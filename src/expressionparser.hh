@@ -25,23 +25,27 @@
 
 #include <string>
 #include <memory>
+#include <functional>
 
 class SipAttributes;
 
 void log_boolean_expression_evaluation(bool value);
 void log_boolean_expression_parsing(bool value);
 
+
 class BooleanExpression{
 protected:
 	BooleanExpression(){}
+	typedef std::function<bool(const SipAttributes* )> GeneratorFun_t;
 public:
 #ifndef NO_SOFIA
 		bool eval(const sip_t *sip);
 #endif
-		virtual bool eval(const SipAttributes *args)=0;
 		virtual ~BooleanExpression();
+		virtual GeneratorFun_t getGenerator()=0;
 		static std::shared_ptr<BooleanExpression> parse(const std::string &str);
 		long ptr();
+		bool eval(const SipAttributes *args);
 };
 
 

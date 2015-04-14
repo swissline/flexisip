@@ -33,15 +33,22 @@ long BooleanExpression::ptr() {
 #ifndef NO_SOFIA
 bool BooleanExpression::eval ( const sip_t* sip ) {
 	SipAttributes attr(sip);
-	return eval(&attr);
+	auto generator = getGenerator();
+	return generator(&attr);
 }
 #endif
+
+bool BooleanExpression::eval(const SipAttributes *args){
+	return getGenerator()(args);
+}
 
 
 class EmptyBooleanExpression : public BooleanExpression {
 public:
 	EmptyBooleanExpression() {}
-	bool eval(const SipAttributes *args) { return true; }
+	GeneratorFun_t getGenerator() {
+		return [](const SipAttributes*args) { return true; };
+	}
 };
 
 shared_ptr<BooleanExpression> parseExpression(const string & expr, size_t *newpos);
@@ -137,62 +144,65 @@ public:
 
 class TrueFalseExpression : public BooleanExpression {
 	string mId;
+	bool is_final;
+	bool final_value;
 public:
-	TrueFalseExpression(const string &value) : mId(value){}
-	virtual bool eval(const SipAttributes *args){
-		if (mId == "true") return true;
-		if (mId == "false") return false;
-		return args->isTrue(mId);
+	TrueFalseExpression(const string &value) : mId(value){
+		if( mId == "true" || mId == "false"){
+			is_final = true;
+			final_value = (mId == "true") ? true : false;
+		}
+	}
+	GeneratorFun_t getGenerator(){
+		return [this](const SipAttributes* args){
+			// TODO: make SipArgs return a generator too
+			if (is_final) return final_value;
+			return args->isTrue(mId);
+		};
 	}
 };
 
 class LogicalAnd : public BooleanExpression{
-	shared_ptr<BooleanExpression> mExp1,mExp2;
+	GeneratorFun_t gen1,gen2;
 public:
-	LogicalAnd(shared_ptr<BooleanExpression> exp1, shared_ptr<BooleanExpression> exp2): mExp1(exp1), mExp2(exp2){
+	LogicalAnd(shared_ptr<BooleanExpression> exp1, shared_ptr<BooleanExpression> exp2): gen1(exp1->getGenerator()), gen2(exp2->getGenerator()){
 		LOGPARSE << "Creating LogicalAnd";
 	}
-	virtual bool eval(const SipAttributes *args){
-		LOGEVAL << "eval && : " << ptr();
-		bool e1=mExp1->eval(args);
-		LOGEVAL << "eval && : " << ptr() << "left exp =" << tf(e1);
-		bool res=e1 && mExp2->eval(args);
-		LOGEVAL << "eval && : " << ptr() << tf(res);
-		return res;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			return gen1(args) && gen2(args);
+		};
 	}
 };
 
 
 class LogicalOr : public BooleanExpression{
+	GeneratorFun_t gen1;
+	GeneratorFun_t gen2;
 public:
-	LogicalOr(shared_ptr<BooleanExpression> exp1, shared_ptr<BooleanExpression> exp2): mExp1(exp1), mExp2(exp2){
-		LOGPARSE << "Creating LogicalOr";
+	LogicalOr(shared_ptr<BooleanExpression> exp1, shared_ptr<BooleanExpression> exp2) {
+		gen1 = exp1->getGenerator();
+		gen2 = exp2->getGenerator();
 	}
-	virtual bool eval(const SipAttributes *args){
-		LOGEVAL << "eval || : " << ptr();
-		bool e1=mExp1->eval(args);
-		LOGEVAL << "eval || : " <<ptr() << "left exp =" << tf(e1);
-
-		bool res=e1 || mExp2->eval(args);
-		LOGEVAL << "eval || : " << tf(res);
-		return res;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			return gen1(args) || gen2(args);
+		};
 	}
-private:
-	shared_ptr<BooleanExpression> mExp1,mExp2;
 };
 
 class LogicalNot : public BooleanExpression{
 public:
-	LogicalNot(shared_ptr<BooleanExpression> exp) :mExp(exp){
+	LogicalNot(shared_ptr<BooleanExpression> exp) :gen1(exp->getGenerator()){
 		LOGPARSE << "Creating LogicalNot";
 	}
-	virtual bool eval(const SipAttributes *args){
-		bool res=!mExp->eval(args);
-		LOGEVAL << "evaluating logicalnot : " << (res?"true":"false");
-		return res;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			return ! gen1(args);
+		};
 	}
 private:
-	shared_ptr<BooleanExpression> mExp;
+	GeneratorFun_t gen1;
 };
 
 
@@ -201,10 +211,12 @@ public:
 	EqualsOp(shared_ptr<VariableOrConstant> var1, shared_ptr<VariableOrConstant> var2) : mVar1(var1), mVar2(var2){
 		LOGPARSE << "Creating EqualsOperator";
 	}
-	virtual bool eval(const SipAttributes *args){
-		bool res=mVar1->get(args)==mVar2->get(args);
-		LOGEVAL << "evaluating "<< mVar1->get(args)<< " == "<< mVar2->get(args)<< " : " << (res?"true":"false");
-		return res;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			bool res=mVar1->get(args)==mVar2->get(args);
+			LOGEVAL << "evaluating "<< mVar1->get(args)<< " == "<< mVar2->get(args)<< " : " << (res?"true":"false");
+			return res;
+		};
 	}
 private:
 	shared_ptr<VariableOrConstant> mVar1,mVar2;
@@ -217,10 +229,12 @@ public:
 	: mVar1(var1), mVar2(var2){
 		LOGPARSE << "Creating UnEqualsOperator";
 	}
-	virtual bool eval(const SipAttributes *args){
-		bool res=mVar1->get(args)!=mVar2->get(args);
-		LOGEVAL << "evaluating " << mVar1->get(args) << " != " << mVar2->get(args) << " : " << (res?"true":"false");
-		return res;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			bool res=mVar1->get(args)!=mVar2->get(args);
+			LOGEVAL << "evaluating " << mVar1->get(args) << " != " << mVar2->get(args) << " : " << (res?"true":"false");
+			return res;
+		};
 	}
 private:
 	shared_ptr<VariableOrConstant> mVar1,mVar2;
@@ -233,17 +247,19 @@ public:
 	NumericOp(shared_ptr<VariableOrConstant> var) : mVar(var){
 		LOGPARSE << "Creating NumericOperator";
 	}
-	virtual bool eval(const SipAttributes *args){
-		string var=mVar->get(args);
-		bool res=true;
-		for (auto it=var.begin(); it != var.end(); ++it) {
-			if (!isdigit(*it)) {
-				res=false;
-				break;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			string var=mVar->get(args);
+			bool res=true;
+			for (auto it=var.begin(); it != var.end(); ++it) {
+				if (!isdigit(*it)) {
+					res=false;
+					break;
+				}
 			}
-		}
-		LOGEVAL << "evaluating " << var << " is numeric : " << (res?"true":"false");
-		return res;
+			LOGEVAL << "evaluating " << var << " is numeric : " << (res?"true":"false");
+			return res;
+		};
 	}
 };
 
@@ -255,10 +271,12 @@ public:
 	DefinedOp(string name, shared_ptr<VariableOrConstant> var) : mVar(var), mName(name){
 		LOGPARSE << "Creating DefinedOperator";
 	}
-	virtual bool eval(const SipAttributes *args){
-		bool res=mVar->defined(args);
-		LOGEVAL << "evaluating is defined for " << mName << (res?"true":"false");
-		return res;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			bool res=mVar->defined(args);
+			LOGEVAL << "evaluating is defined for " << mName << (res?"true":"false");
+			return res;
+		};
 	}
 };
 
@@ -277,24 +295,26 @@ public:
 	~Regex() {
 		regfree(&preg);
 	}
-	virtual bool eval(const SipAttributes *args){
-		string input=mInput->get(args);
-		int match = regexec(&preg, input.c_str(), 0, NULL, 0);
-		bool res;
-		switch (match) {
-		case 0:
-			res=true;
-			break;
-		case REG_NOMATCH:
-			res=false;
-			break;
-		default:
-			regerror (match, &preg, error_msg_buff, sizeof(error_msg_buff));
-			throw invalid_argument("Error evaluating regex " + string(error_msg_buff));
-		}
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			string input=mInput->get(args);
+			int match = regexec(&preg, input.c_str(), 0, NULL, 0);
+			bool res;
+			switch (match) {
+			case 0:
+				res=true;
+				break;
+			case REG_NOMATCH:
+				res=false;
+				break;
+			default:
+				regerror (match, &preg, error_msg_buff, sizeof(error_msg_buff));
+				throw invalid_argument("Error evaluating regex " + string(error_msg_buff));
+			}
 
-		LOGEVAL << "evaluating " << input << " is regex  " << mPattern->get(NULL) << " : " << (res?"true":"false");
-		return res;
+			LOGEVAL << "evaluating " << input << " is regex  " << mPattern->get(NULL) << " : " << (res?"true":"false");
+			return res;
+		};
 	}
 };
 
@@ -302,10 +322,12 @@ class ContainsOp : public BooleanExpression{
 	shared_ptr<VariableOrConstant> mVar1,mVar2;
 public:
 	ContainsOp(shared_ptr<VariableOrConstant> var1, shared_ptr<VariableOrConstant> var2) : mVar1(var1), mVar2(var2){}
-	virtual bool eval(const SipAttributes *args){
-		bool res=mVar1->get(args).find(mVar2->get(args))!=std::string::npos;
-		LOGEVAL << "evaluating " << mVar1->get(args) << " contains " << mVar2->get(args) << " : " << (res?"true":"false");
-		return res;
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			bool res=mVar1->get(args).find(mVar2->get(args))!=std::string::npos;
+			LOGEVAL << "evaluating " << mVar1->get(args) << " contains " << mVar2->get(args) << " : " << (res?"true":"false");
+			return res;
+		};
 	}
 };
 
@@ -313,21 +335,23 @@ public:
 class InOp : public BooleanExpression{
 public:
 	InOp(shared_ptr<VariableOrConstant> var1, shared_ptr<VariableOrConstant> var2) : mVar1(var1), mVar2(var2){}
-	virtual bool eval(const SipAttributes *args){
-		bool res=false;
-		const list<string> &values=mVar2->getAsList(args);
-		const string &varValue=mVar1->get(args);
+	GeneratorFun_t getGenerator() {
+		return [this](const SipAttributes*args){
+			bool res=false;
+			const list<string> &values=mVar2->getAsList(args);
+			const string &varValue=mVar1->get(args);
 
-		LOGEVAL << "Evaluating '" << varValue << "' IN {" << mVar2->get(args) << "}";
-		for (auto it=values.begin(); it != values.end(); ++it) {
-			LOGEVAL << "Trying '" <<  *it << "'";
-			if (varValue == *it) {
-				res=true;
-				break;
+			LOGEVAL << "Evaluating '" << varValue << "' IN {" << mVar2->get(args) << "}";
+			for (auto it=values.begin(); it != values.end(); ++it) {
+				LOGEVAL << "Trying '" <<  *it << "'";
+				if (varValue == *it) {
+					res=true;
+					break;
+				}
 			}
-		}
-		LOGEVAL << "->" << (res?"true":"false");
-		return res;
+			LOGEVAL << "->" << (res?"true":"false");
+			return res;
+		};
 	}
 private:
 	shared_ptr<VariableOrConstant> mVar1,mVar2;
@@ -367,7 +391,7 @@ static shared_ptr<Constant> buildConstant(const string & expr, size_t *newpos){
 	size_t end=expr.find_first_of('\'',*newpos+1);
 	if (end!=string::npos){
 		size_t len=end-*newpos-1;
-		auto cons=expr.substr(*newpos+1,len);
+		string cons=expr.substr(*newpos+1,len);
 		*newpos+=len +2; // remove the two '
 		return make_shared<Constant>(cons);
 	}else {
