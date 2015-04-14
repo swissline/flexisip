@@ -32,12 +32,14 @@ public:
 	SipAttributes(std::string &attributes);
 #else
 	SipAttributes(const sip_t *isip) : sip(isip){}
+	typedef std::function<std::string()> SipGetterFunc_t;
 private:
 	const sip_t *sip;
 #endif
 public:
 	~SipAttributes(){}
 
+	SipGetterFunc_t getterForKey(const std::string &key) const;
 
 	std::string get(const std::string &arg) const;
 
