@@ -21,6 +21,7 @@
 
 #include <string>
 #include <memory>
+#include <functional>
 
 #ifndef NO_SOFIA
 #include <sofia-sip/sip.h>
