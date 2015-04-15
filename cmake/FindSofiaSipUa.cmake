@@ -36,7 +36,7 @@ set(_SOFIA_SIP_UA_ROOT_PATHS
 find_path(SOFIA_SIP_UA_INCLUDE_DIRS
   NAMES sofia-sip/sip.h
   HINTS _SOFIA_SIP_UA_ROOT_PATHS
-  PATH_SUFFIXES include/sofia-sip-1.13
+  PATH_SUFFIXES include/sofia-sip-1.13 include/sofia-sip-1.12
 )
 
 if(SOFIA_SIP_UA_INCLUDE_DIRS)
@@ -44,7 +44,7 @@ if(SOFIA_SIP_UA_INCLUDE_DIRS)
 endif()
 
 find_library(SOFIA_SIP_UA_LIBRARIES
-  NAMES libsofia-sip-ua
+  NAMES sofia-sip-ua
   HINTS ${_SOFIA_SIP_UA_ROOT_PATHS}
   PATH_SUFFIXES bin lib
 )
