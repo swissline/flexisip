@@ -50,6 +50,8 @@ option(ENABLE_REDIS "" NO)
 option(ENABLE_SNMP "Build with SNMP support" YES)
 option(ENABLE_TRANSCODER "" YES)
 cmake_dependent_option(ENABLE_SPECIFIC_FEATURES "Enable mediarelay specific features" OFF "ENABLE_TRANSCODER" OFF)
+set(XSDCXX_ROOT_PATH ${CMAKE_INSTALL_PREFIX} CACHE STRING "Path of where the bin/xsdcxx executable will be found. Comes from http://www.codesynthesis.com/products/xsd/download.xhtml")
+
 
 set(SYSCONFIGROOT "" CACHE STRING "Config directory, the place where flexisip expects its flexisip.conf file to reside" )
 set(CONFIG_DIR ${SYSCONFIGROOT}/etc)
@@ -70,6 +72,16 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 # Required packages
 find_package(SofiaSipUa REQUIRED)
 find_package(ortp 0.21 REQUIRED)
+find_library(XERCES_LIBS NAMES xerces-c)
+if(NOT XERCES_LIBS)
+	message(FATAL_ERROR "Failed to find the Xerces library.")
+endif()
+
+
+find_program(XSDCXX_PROG NAMES "xsdcxx" "xsd" HINTS ${XSDCXX_ROOT_PATH}/bin NO_DEFAULT_PATH)
+if(NOT XSDCXX_PROG)
+	message(FATAL_ERROR "Program 'xsdcxx' is required but could not be found")	  
+endif()
 
 check_function_exists(arc4random HAVE_ARC4RANDOM)
 find_file(HAVE_SYS_PRCTL_H NAMES sys/prctl.h)
@@ -177,10 +189,6 @@ endif()
 
 if(ENABLE_PRESENCE)
 	find_package(belle-sip 1.2.4 REQUIRED)
-	find_library(XercesLibrary NAMES xerces-c)
-	if(NOT XercesLibrary)
-		message(FATAL_ERROR "Failed to find the Xerces library.")
-	endif()
 endif()
 
 # Boost checks 

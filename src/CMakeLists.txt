@@ -1,5 +1,5 @@
 
-set(FLEXISIP_LIBS ${ORTP_LIBRARIES} ${SOFIA_SIP_UA_LIBRARIES})
+set(FLEXISIP_LIBS ${ORTP_LIBRARIES} ${SOFIA_SIP_UA_LIBRARIES} ${XERCES_LIBS})
 
 set(FLEXISIP_INCLUDES)
 
@@ -55,6 +55,22 @@ set(FLEXISIP_SOURCES
 # TODO: GIT VERSION FILE
 )
 
+set(FTHTTP_XSD_SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/xml/fthttp.xsd)
+set(FTHTTP_XSD_GENERATED_FILES ${CMAKE_CURRENT_BINARY_DIR}/xml/fthttp.hxx ${CMAKE_CURRENT_BINARY_DIR}/xml/fthttp.cxx)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/xml")
+add_custom_command(OUTPUT ${FTHTTP_XSD_GENERATED_FILES}
+  COMMAND "${XSDCXX_PROG}" "cxx-tree" "--generate-wildcard" 
+  			"--generate-serialization" "--generate-ostream" 
+  			"--generate-detach" "--std" "c++11" "--type-naming" "java"
+			"--function-naming" "java"  "--location-regex-trace" 
+			"--location-regex" "\"%http://.+/(.+)%\$$1%\"" 
+			"--output-dir" "${CMAKE_CURRENT_BINARY_DIR}/xml"
+	${FTHTTP_XSD_SOURCE_FILES}
+  COMMENT "Generating XSD for FTHTTP")
+set_source_files_properties(${FTHTTP_XSD_GENERATED_FILES} PROPERTIES GENERATED ON)
+list(APPEND FLEXISIP_SOURCES ${FTHTTP_XSD_GENERATED_FILES})
+list(APPEND FLEXISIP_INCLUDES ${XSDCXX_ROOT_PATH}/libxsd)
+
 if(ENABLE_ODB)
 	#list(APPEND FLEXISIP_LIBS ${ODB_LIBRARIES})
 	#list(APPEND FLEXISIP_INCLUDES ${ODB_INCLUDE_DIRS})
@@ -105,9 +121,14 @@ endif()
 if(ENABLE_PROTOBUF)
 	# TODO: generate the protobuf wrapper
 	# protoc --proto_path=$(builddir) --cpp_out=$(builddir) $(pb_files)
+	set(PROTOBUF_GENERATED_FILES ${CMAKE_CURRENT_BINARY_DIR}/recordserializer-protobuf.pb.cc ${CMAKE_CURRENT_BINARY_DIR}/recordserializer-protobuf.pb.h)
 	set(PROTOBUF_PROTO ${CMAKE_CURRENT_SOURCE_DIR}/recordserializer-protobuf.proto)
+	add_custom_command(OUTPUT ${PROTOBUF_GENERATED_FILES}
+	  COMMAND "${PROTOBUF_PROTOC_EXECUTABLE}" "--proto_path=${CMAKE_CURRENT_SOURCE_DIR}" "--cpp_out=${CMAKE_CURRENT_BINARY_DIR}" "${PROTOBUF_PROTO}"
+	  COMMENT "Generate protobuf wrappers")
+	set_source_files_properties(${PROTOBUF_GENERATED_FILES} PROPERTIES GENERATED ON)
 
-	list(APPEND FLEXISIP_SOURCES recordserializer-protobuf.cc)
+	list(APPEND FLEXISIP_SOURCES recordserializer-protobuf.cc ${PROTOBUF_GENERATED_FILES})
 	list(APPEND FLEXISIP_LIBS ${PROTOBUF_LIBRARIES} )
 	list(APPEND FLEXISIP_INCLUDES ${PROTOBUF_INCLUDE_DIRS})
 	add_definitions(-DENABLE_PROTOBUF)
@@ -115,7 +136,7 @@ endif()
 
 if(ENABLE_PRESENCE)
 	list(APPEND FLEXISIP_SOURCES module-presence.cc)
-	list(APPEND FLEXISIP_LIBS ${BELLESIP_LIBRARIES} ${XercesLibrary} )
+	list(APPEND FLEXISIP_LIBS ${BELLESIP_LIBRARIES} ${XERCES_LIBS} )
 	list(APPEND FLEXISIP_INCLUDES ${BELLESIP_INCLUDE_DIRS})
 	add_definitions(-DBELLE_SIP_USE_STL ${BELLE_SIP_CFLAGS})
 endif()
