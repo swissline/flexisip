@@ -58,7 +58,7 @@ set(FLEXISIP_SOURCES
 set(FLEXISIP_DEPENDENCIES fthttp)
 
 
-function(ADD_XSD_WRAPPERS sources_list file _comment)
+function(ADD_XSD_WRAPPERS file _comment)
 	set(destinations ${CMAKE_CURRENT_BINARY_DIR}/xml/${file}.hxx ${CMAKE_CURRENT_BINARY_DIR}/xml/${file}.cxx)
 	set(source ${CMAKE_CURRENT_SOURCE_DIR}/xml/${file}.xsd)
 	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/xml")
@@ -74,16 +74,15 @@ function(ADD_XSD_WRAPPERS sources_list file _comment)
 			"--output-dir" "${CMAKE_CURRENT_BINARY_DIR}/xml" "${source}"
 		COMMENT "${_comment}")
 
-	add_custom_target(${file}
-		DEPENDS ${destinations})
+	add_custom_target(${file} DEPENDS ${destinations})
 
 	set_source_files_properties(${destinations} PROPERTIES GENERATED ON)
-	list(APPEND sources_list ${destinations})
+	set(FLEXISIP_SOURCES ${FLEXISIP_SOURCES} ${destinations} PARENT_SCOPE)
 endfunction()
 
 
 list(APPEND FLEXISIP_INCLUDES ${XSDCXX_ROOT_PATH}/libxsd)
-ADD_XSD_WRAPPERS( FLEXISIP_SOURCES fthttp "Generating XSD for FTHTTP")
+ADD_XSD_WRAPPERS( fthttp "Generating XSD for FTHTTP")
 
 
 if(ENABLE_ODB)
@@ -154,8 +153,8 @@ if(ENABLE_PRESENCE)
 	list(APPEND FLEXISIP_LIBS ${BELLESIP_LIBRARIES} ${XERCES_LIBS} )
 	list(APPEND FLEXISIP_INCLUDES ${BELLESIP_INCLUDE_DIRS})
 	add_definitions(-DBELLE_SIP_USE_STL ${BELLE_SIP_CFLAGS})
-	ADD_XSD_WRAPPERS( FLEXISIP_SOURCES xml "Presence XSD - xml.xsd")
-	ADD_XSD_WRAPPERS( FLEXISIP_SOURCES pidf+xml "Presence XSD - pidf+xml.xsd")
+	ADD_XSD_WRAPPERS( xml "Presence XSD - xml.xsd")
+	ADD_XSD_WRAPPERS( pidf+xml "Presence XSD - pidf+xml.xsd")
 	list(APPEND FLEXISIP_DEPENDENCIES xml pidf+xml)
 endif()
 
