@@ -55,21 +55,36 @@ set(FLEXISIP_SOURCES
 # TODO: GIT VERSION FILE
 )
 
-set(FTHTTP_XSD_SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/xml/fthttp.xsd)
-set(FTHTTP_XSD_GENERATED_FILES ${CMAKE_CURRENT_BINARY_DIR}/xml/fthttp.hxx ${CMAKE_CURRENT_BINARY_DIR}/xml/fthttp.cxx)
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/xml")
-add_custom_command(OUTPUT ${FTHTTP_XSD_GENERATED_FILES}
-  COMMAND "${XSDCXX_PROG}" "cxx-tree" "--generate-wildcard" 
+set(FLEXISIP_DEPENDENCIES fthttp)
+
+
+function(ADD_XSD_WRAPPERS sources_list file _comment)
+	set(destinations ${CMAKE_CURRENT_BINARY_DIR}/xml/${file}.hxx ${CMAKE_CURRENT_BINARY_DIR}/xml/${file}.cxx)
+	set(source ${CMAKE_CURRENT_SOURCE_DIR}/xml/${file}.xsd)
+	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/xml")
+
+	set(regex "%http://.+/(.+)%\\\$$1%")
+
+	add_custom_command(OUTPUT ${destinations}
+		COMMAND "${XSDCXX_PROG}" "cxx-tree" "--generate-wildcard" 
   			"--generate-serialization" "--generate-ostream" 
   			"--generate-detach" "--std" "c++11" "--type-naming" "java"
 			"--function-naming" "java"  "--location-regex-trace" 
-			"--location-regex" "\"%http://.+/(.+)%\$$1%\"" 
-			"--output-dir" "${CMAKE_CURRENT_BINARY_DIR}/xml"
-	${FTHTTP_XSD_SOURCE_FILES}
-  COMMENT "Generating XSD for FTHTTP")
-set_source_files_properties(${FTHTTP_XSD_GENERATED_FILES} PROPERTIES GENERATED ON)
-list(APPEND FLEXISIP_SOURCES ${FTHTTP_XSD_GENERATED_FILES})
+			"--location-regex" "\"${regex}\"" 
+			"--output-dir" "${CMAKE_CURRENT_BINARY_DIR}/xml" "${source}"
+		COMMENT "${_comment}")
+
+	add_custom_target(${file}
+		DEPENDS ${destinations})
+
+	set_source_files_properties(${destinations} PROPERTIES GENERATED ON)
+	list(APPEND sources_list ${destinations})
+endfunction()
+
+
 list(APPEND FLEXISIP_INCLUDES ${XSDCXX_ROOT_PATH}/libxsd)
+ADD_XSD_WRAPPERS( FLEXISIP_SOURCES fthttp "Generating XSD for FTHTTP")
+
 
 if(ENABLE_ODB)
 	#list(APPEND FLEXISIP_LIBS ${ODB_LIBRARIES})
@@ -139,6 +154,9 @@ if(ENABLE_PRESENCE)
 	list(APPEND FLEXISIP_LIBS ${BELLESIP_LIBRARIES} ${XERCES_LIBS} )
 	list(APPEND FLEXISIP_INCLUDES ${BELLESIP_INCLUDE_DIRS})
 	add_definitions(-DBELLE_SIP_USE_STL ${BELLE_SIP_CFLAGS})
+	ADD_XSD_WRAPPERS( FLEXISIP_SOURCES xml "Presence XSD - xml.xsd")
+	ADD_XSD_WRAPPERS( FLEXISIP_SOURCES pidf+xml "Presence XSD - pidf+xml.xsd")
+	list(APPEND FLEXISIP_DEPENDENCIES xml pidf+xml)
 endif()
 
 if(ENABLE_PUSHNOTIFICATION)
@@ -153,6 +171,7 @@ endif()
 message(STATUS "Flexisip LIBS : ${FLEXISIP_LIBS}")
 message(STATUS "Flexisip INCLUDES : ${FLEXISIP_INCLUDES}")
 
-add_executable( flexisip ${FLEXISIP_SOURCES} )
+add_executable( flexisip ${FLEXISIP_SOURCES})
+add_dependencies( flexisip ${FLEXISIP_DEPENDENCIES} )
 target_link_libraries(flexisip ${FLEXISIP_LIBS})
 target_include_directories(flexisip PUBLIC ${FLEXISIP_INCLUDES})
