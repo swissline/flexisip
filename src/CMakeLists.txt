@@ -125,7 +125,7 @@ if(ENABLE_DATEHANDLER)
 	list(APPEND FLEXISIP_SOURCES module-datehandler.cc)
 endif()
 
-if(ENABLE_HIREDIS)
+if(ENABLE_REDIS)
 	list(APPEND FLEXISIP_SOURCES registrardb-redis-async.cc registrardb-redis.hh registrardb-redis-sofia-event.h)
 	list(APPEND FLEXISIP_LIBS ${HIREDIS_LIBRARIES} )
 	list(APPEND FLEXISIP_INCLUDES ${HIREDIS_INCLUDE_DIRS})
