@@ -1,23 +1,23 @@
 ############################################################################
 # CMakeLists.txt
 # Copyright (C) 2014  Belledonne Communications, Grenoble France
-# 
+#
 ############################################################################
-# 
+#
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
 # as published by the Free Software Foundation; either version 2
 # of the License, or (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-# 
+#
 ############################################################################
 cmake_minimum_required(VERSION 3.0.0 FATAL_ERROR)
 
@@ -52,7 +52,6 @@ option(ENABLE_TRANSCODER "" YES)
 cmake_dependent_option(ENABLE_SPECIFIC_FEATURES "Enable mediarelay specific features" OFF "ENABLE_TRANSCODER" OFF)
 set(XSDCXX_ROOT_PATH ${CMAKE_INSTALL_PREFIX} CACHE STRING "Path of where the bin/xsdcxx executable will be found. Comes from http://www.codesynthesis.com/products/xsd/download.xhtml")
 
-
 set(SYSCONFIGROOT "" CACHE STRING "Config directory, the place where flexisip expects its flexisip.conf file to reside" )
 set(CONFIG_DIR ${SYSCONFIGROOT}/etc)
 message(STATUS "Config dir: ${CONFIG_DIR}")
@@ -60,7 +59,7 @@ message(STATUS "Config dir: ${CONFIG_DIR}")
 function(FIND_PROGRAM_REQUIRED varname progname)
 	find_program(${varname} NAMES "${progname}")
 	if(NOT ${varname})
-		message(FATAL_ERROR "Program '${progname}' is required but could not be found")	  
+		message(FATAL_ERROR "Program '${progname}' is required but could not be found")
 	endif()
 endfunction()
 
@@ -71,7 +70,7 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
 # Required packages
 find_package(SofiaSipUa REQUIRED)
-find_package(ortp 0.21 REQUIRED)
+find_package(ORTP 0.21 REQUIRED)
 find_library(XERCES_LIBS NAMES xerces-c)
 if(NOT XERCES_LIBS)
 	message(FATAL_ERROR "Failed to find the Xerces library.")
@@ -80,7 +79,7 @@ endif()
 
 find_program(XSDCXX_PROG NAMES "xsdcxx" "xsd" HINTS ${XSDCXX_ROOT_PATH}/bin NO_DEFAULT_PATH)
 if(NOT XSDCXX_PROG)
-	message(FATAL_ERROR "Program 'xsdcxx' is required but could not be found")	  
+	message(FATAL_ERROR "Program 'xsdcxx' is required but could not be found")
 endif()
 
 check_function_exists(arc4random HAVE_ARC4RANDOM)
@@ -105,7 +104,7 @@ if(ENABLE_SNMP)
 	FIND_PROGRAM_REQUIRED(NET_SNMP_PROG net-snmp-config)
 	find_path(NET_SNMP_INCLUDE_DIRS NAMES net-snmp/net-snmp-config.h)
 	if(NOT NET_SNMP_INCLUDE_DIRS)
-		message(FATAL_ERROR "SNMP header files not found")	  
+		message(FATAL_ERROR "SNMP header files not found")
 	endif()
 
 	execute_process(COMMAND "${NET_SNMP_PROG}" "--agent-libs" OUTPUT_VARIABLE NET_SNMP_LIBRARIES OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -119,7 +118,7 @@ if(ENABLE_ODBC)
 	execute_process(COMMAND "${ODBC_PROG}" "--lib-prefix" OUTPUT_VARIABLE ODBC_LIBRARY_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
 	message(STATUS "ODBC libraries: ${ODBC_LIBRARIES}")
 	message(STATUS "ODBC headers: ${ODBC_CFLAGS}")
-	
+
 	# check SQL headers
 	find_path(ODBC_SQL_HEADERS NAMES sql.h sqlext.h sqltypes.h mysql/mysql.h PATHS ODBC_INCLUDE_DIRS )
 	if(NOT ODBC_SQL_HEADERS)
@@ -131,7 +130,7 @@ if(ENABLE_ODBC)
 	# check that odbc_config gives us a correct library path
 	find_library(ODBC_LIB_FOUND NAMES odbc PATHS ODBC_LIBRARY_DIR)
 	if(NOT ODBC_LIB_FOUND )
-		message(FATAL_ERROR "ODBC library not found.")	  
+		message(FATAL_ERROR "ODBC library not found.")
 	endif()
 endif()
 
@@ -179,7 +178,7 @@ if(ENABLE_PROTOBUF)
 		message(FATAL_ERROR "Protobuf not found and is required")
 	endif()
 	if(NOT PROTOBUF_PROTOC_EXECUTABLE)
-		message(FATAL_ERROR "Protobuf 'protoc' executable not found and is required")		
+		message(FATAL_ERROR "Protobuf 'protoc' executable not found and is required")
 	endif()
 endif()
 
@@ -191,7 +190,7 @@ if(ENABLE_PRESENCE)
 	find_package(belle-sip 1.2.4 REQUIRED)
 endif()
 
-# Boost checks 
+# Boost checks
 set(BOOST_COMPONENTS )
 if(ENABLE_BOOSTLOG)
 	list(APPEND BOOST_COMPONENTS log regex system thread)
@@ -215,3 +214,14 @@ configure_file(${PROJECT_SOURCE_DIR}/cmake/flexisip-config.h.in ${PROJECT_BINARY
 set_source_files_properties(${PROJECT_BINARY_DIR}/flexisip-config.h PROPERTIES GENERATED ON)
 
 add_subdirectory(src)
+
+# Packaging
+
+set(CPACK_GENERATOR TGZ;DEB;RPM)
+set(CPACK_PACKAGE_VERSION_MAJOR ${FLEXISIP_MAJOR_VERSION})
+set(CPACK_PACKAGE_VERSION_MINOR ${FLEXISIP_MINOR_VERSION})
+set(CPACK_PACKAGE_VERSION_PATCH ${FLEXISIP_MICRO_VERSION})
+set(CPACK_PACKAGE_VERSION ${FLEXISIP_VERSION})
+set(CPACK_PACKAGE_CONTACT info@belledonne-communications.com)
+
+include(CPack)

@@ -174,3 +174,11 @@ add_executable( flexisip ${FLEXISIP_SOURCES})
 add_dependencies( flexisip ${FLEXISIP_DEPENDENCIES} )
 target_link_libraries(flexisip ${FLEXISIP_LIBS})
 target_include_directories(flexisip PUBLIC ${FLEXISIP_INCLUDES})
+
+
+install(TARGETS flexisip
+	RUNTIME DESTINATION bin
+	LIBRARY DESTINATION lib
+	ARCHIVE DESTINATION lib
+	PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+)
