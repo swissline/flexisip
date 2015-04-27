@@ -171,9 +171,14 @@ message(STATUS "Flexisip LIBS : ${FLEXISIP_LIBS}")
 message(STATUS "Flexisip INCLUDES : ${FLEXISIP_INCLUDES}")
 
 add_executable( flexisip ${FLEXISIP_SOURCES})
-add_dependencies( flexisip ${FLEXISIP_DEPENDENCIES} )
+add_dependencies( flexisip ${FLEXISIP_DEPENDENCIES})
 target_link_libraries(flexisip ${FLEXISIP_LIBS})
 target_include_directories(flexisip PUBLIC ${FLEXISIP_INCLUDES})
+
+# expression parser tester
+add_executable(expr test/expr.cc expressionparser.cc expressionparser.hh sipattrextractor.hh)
+target_link_libraries(expr ${ORTP_LIBRARIES} ${MEDIASTREAMER2_LIBRARIES})
+target_compile_options(expr PUBLIC -DTEST_BOOL_EXPR -DNO_SOFIA)
 
 
 install(TARGETS flexisip
