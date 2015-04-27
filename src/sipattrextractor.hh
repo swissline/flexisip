@@ -29,11 +29,11 @@
 
 class SipAttributes {
 public:
+	typedef std::function<std::string()> SipGetterFunc_t;
 #ifdef NO_SOFIA
-	SipAttributes(std::string &attributes);
+	SipAttributes(const char*attributes);
 #else
 	SipAttributes(const sip_t *isip) : sip(isip){}
-	typedef std::function<std::string()> SipGetterFunc_t;
 private:
 	const sip_t *sip;
 #endif
