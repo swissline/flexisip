@@ -39,7 +39,7 @@ public:
 		if (listener) listener->onResult(PASSWORD_FOUND, "user@domain.com");
 	}
 	virtual void getPasswordFromBackend(const string &id, const string &domain,
-										const string &authid, AuthDbListener *listener, AuthDbListener *listener_ref) {
+										const string &authid, AuthDbListener *listener) {
 		if (listener) listener->onResult(PASSWORD_FOUND, "fixed");
 	}
 	static void declareConfig(GenericStruct *mc){};
@@ -169,31 +169,7 @@ void AuthDbBackend::getPassword(const string &user, const string &host, const st
 	}
 
 	// if we reach here, password wasn't cached: we have to grab the password from the actual backend
-	getPasswordFromBackend(user, host, auth_username, listener, NULL);
-}
-
-void AuthDbBackend::getPasswordForAlgo(const string &user, const string &host, const string &auth_username,
-										AuthDbListener *listener, AuthDbListener *listener_ref) {
-	// Check for usable cached password
-	string key(createPasswordKey(user, auth_username));
-	vector<passwd_algo_t> pass;
-
-	switch (getCachedPassword(key, host, pass)) {
-		case VALID_PASS_FOUND:
-			if (listener) listener->onResult(AuthDbResult::PASSWORD_FOUND, pass);
-			if (listener_ref) listener_ref->finishVerifyAlgos(pass);
-			return;
-		case EXPIRED_PASS_FOUND:
-			// Might check here if connection is failing
-			// If it is the case use fallback password and
-			// return AuthDbResult::PASSWORD_FOUND;
-			break;
-		case NO_PASS_FOUND:
-			break;
-	}
-
-	// if we reach here, password wasn't cached: we have to grab the password from the actual backend
-	getPasswordFromBackend(user, host, auth_username, listener, listener_ref);
+	getPasswordFromBackend(user, host, auth_username, listener);
 }
 
 void AuthDbBackend::createCachedAccount(const string &user, const string &host, const string &auth_username, const vector<passwd_algo_t> &password,

@@ -55,7 +55,6 @@ public:
 	virtual void onResult(AuthDbResult result, const std::string &passwd) = 0;
 	virtual void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd)=0;
 	virtual void onResults(const std::list<std::string> &phones, const std::set<std::pair<std::string, std::string>> &presences);
-	virtual void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass)=0;
 	virtual ~AuthDbListener();
 };
 
@@ -90,8 +89,6 @@ public:
 	virtual ~AuthDbBackend();
 	// warning: listener may be invoked on authdb backend thread, so listener must be threadsafe somehow!
 	void getPassword(const std::string & user, const std::string & domain, const std::string &auth_username, AuthDbListener *listener);
-	void getPasswordForAlgo(const std::string &user, const std::string &host, const std::string &auth_username,
-							AuthDbListener *listener, AuthDbListener *listener_ref);
 	void getUserWithPhone(const std::string &phone, const std::string &domain, AuthDbListener *listener);
 	void getUsersWithPhone(std::list<std::tuple<std::string, std::string, AuthDbListener *>> &creds, AuthDbListener *listener);
 	virtual void getUserWithPhoneFromBackend(const std::string &, const std::string &, AuthDbListener *listener) = 0;
@@ -100,7 +97,7 @@ public:
 	virtual void createAccount(const std::string &user, const std::string &domain, const std::string &auth_username, const std::string &password, int expires, const std::string &phone_alias = "");
 
 	virtual void getPasswordFromBackend(const std::string &id, const std::string &domain,
-										const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref) = 0;
+										const std::string &authid, AuthDbListener *listener) = 0;
 
 	static AuthDbBackend *get();
 	/* called by module_auth so that backends can declare their configuration to the ConfigurationManager */
@@ -122,7 +119,7 @@ public:
 	FileAuthDb();
 	virtual void getUserWithPhoneFromBackend(const std::string &phone, const std::string &domain, AuthDbListener *listener);
 	virtual void getPasswordFromBackend(const std::string &id, const std::string &domain,
-										const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref);
+										const std::string &authid, AuthDbListener *listener);
 
 	static void declareConfig(GenericStruct *mc){};
 };
@@ -195,7 +192,7 @@ public:
 	virtual void getUserWithPhoneFromBackend(const std::string & , const std::string &, AuthDbListener *listener);
 	virtual void getUsersWithPhonesFromBackend(std::list<std::tuple<std::string,std::string,AuthDbListener*>> &creds, AuthDbListener *listener);
 	virtual void getPasswordFromBackend(const std::string &id, const std::string &domain,
-										const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref);
+										const std::string &authid, AuthDbListener *listener);
 
 	static void declareConfig(GenericStruct *mc);
 
@@ -203,7 +200,7 @@ private:
 	void getUserWithPhoneWithPool(const std::string &phone, const std::string &domain, AuthDbListener *listener);
 	void getUsersWithPhonesWithPool(std::list<std::tuple<std::string,std::string,AuthDbListener*>> &creds, AuthDbListener *listener);
 	void getPasswordWithPool(const std::string &id, const std::string &domain,
-							const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref);
+							const std::string &authid, AuthDbListener *listener);
 
 	void reconnectSession( soci::session &session );
 

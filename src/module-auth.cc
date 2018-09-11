@@ -246,8 +246,6 @@ private:
 		void onResult(AuthDbResult result, const vector<passwd_algo_t> &passwd);
 		void onError();
 		void finish(); /*the listener is destroyed when calling this, careful*/
-		void finishForAlgorithm();
-		void finishVerifyAlgos(const vector<passwd_algo_t> &pass);
 	
 		su_root_t *getRoot() {
 			return getAgent()->getRoot();
@@ -261,7 +259,21 @@ private:
 	private:
 		void processResponse();
 		static void main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u);
-	};
+    };
+    class CheckAlgosListener : public AuthDbListener {
+        AuthenticationListener *mAuthListener;
+
+    public:
+        CheckAlgosListener(AuthenticationListener *);
+        virtual ~CheckAlgosListener() {
+        }
+        void onResult(AuthDbResult result, const string &passwd);
+        void onResult(AuthDbResult result, const vector<passwd_algo_t> &passwd);
+        void finish();
+
+        private:
+        static void main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u);
+    };
 
 private:
 	static ModuleInfo<Authentication> sInfo;
@@ -475,9 +487,8 @@ public:
 			 * This will force the use of only the algorithm supported by them.
 			 */
 			{StringList, "available-algorithms",
-				"List of algorithms, separated by whitespaces (valid values are MD5 and SHA-256).\n"
-				"This feature allows to force the use of wanted algorithm(s).\n"
-				"If the value is empty, then it will authorize all implemented algorithms.",
+				"List of algorithms, separated by whitespaces (valid values are MD5 and SHA-256), can not be empty.\n"
+				"This feature allows to force the use of wanted algorithm(s).\n",
 				"MD5"},
 
 			{StringList, "trusted-client-certificates", "List of whitespace separated username or username@domain CN "
@@ -532,8 +543,7 @@ public:
 		}
 
 		if (mAlgorithms.empty()) {
-			mAlgorithms.push_back("MD5");
-			mAlgorithms.push_back("SHA-256");
+			SLOGW << "Given algorithm can not be empty. Must be either MD5 or SHA-256.";
 		}
 
 		for (const auto &domain : mDomains) {
@@ -984,23 +994,6 @@ void Authentication::AuthenticationListener::onResult(AuthDbResult result, const
 	}
 }
 
-void Authentication::AuthenticationListener::finishForAlgorithm () {
-	if ((mAlgoUsed.size() > 1) && (mAs->as_status == 401)) {
-		msg_header_t* response;
-		response = msg_header_copy(mAs->as_home, mAs->as_response);
-		msg_header_remove_param((msg_common_t *)response, "algorithm=MD5");
-		msg_header_replace_item(mAs->as_home, (msg_common_t *)response, "algorithm=SHA-256");
-		mEv->reply(mAs->as_status, mAs->as_phrase, SIPTAG_HEADER((const sip_header_t *)mAs->as_info),
-				SIPTAG_HEADER((const sip_header_t *)response),
-				SIPTAG_HEADER((const sip_header_t *)mAs->as_response),
-				SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
-	} else {
-		mEv->reply(mAs->as_status, mAs->as_phrase, SIPTAG_HEADER((const sip_header_t *)mAs->as_info),
-				SIPTAG_HEADER((const sip_header_t *)mAs->as_response),
-				SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
-	}
-}
-
 /**
  * return true if the event is terminated
  */
@@ -1008,13 +1001,40 @@ void Authentication::AuthenticationListener::finish() {
 	const shared_ptr<MsgSip> &ms = mEv->getMsgSip();
 	const sip_t *sip = ms->getSip();
 	if (mAs->as_status) {
+        if (mAlgoUsed.size()==0){
+            mEv->reply(403, "No password found for supported algorithms", SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
+            if (mModule->mCurrentAuthOp == this) {
+                mModule->mCurrentAuthOp = NULL;
+            }
+            delete this;
+            return;
+        }
 		if (mAs->as_status != 401 && mAs->as_status != 407) {
 			auto log = make_shared<AuthLog>(sip, mPasswordFound);
 			log->setStatusCode(mAs->as_status, mAs->as_phrase);
 			log->setCompleted();
 			mEv->setEventLog(log);
 		}
-		finishForAlgorithm();
+        if ((mAlgoUsed.size() > 1) && (mAs->as_status == 401)) {
+            msg_header_t* response;
+            response = msg_header_copy(mAs->as_home, mAs->as_response);
+            msg_header_remove_param((msg_common_t *)response, "algorithm=MD5");
+            msg_header_replace_item(mAs->as_home, (msg_common_t *)response, "algorithm=SHA-256");
+            mEv->reply(mAs->as_status, mAs->as_phrase, SIPTAG_HEADER((const sip_header_t *)mAs->as_info),
+                       SIPTAG_HEADER((const sip_header_t *)response),
+                       SIPTAG_HEADER((const sip_header_t *)mAs->as_response),
+                       SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
+        } else {
+            if (mAs->as_response && mAlgoUsed.size()==1) {
+                auto it = mAlgoUsed.begin();
+                string algo = "algorithm=" + *it;
+                msg_header_remove_param((msg_common_t *)mAs->as_response, "algorithm=MD5");
+                msg_header_replace_item(mAs->as_home, (msg_common_t *)mAs->as_response, algo.c_str());
+            }
+            mEv->reply(mAs->as_status, mAs->as_phrase, SIPTAG_HEADER((const sip_header_t *)mAs->as_info),
+                       SIPTAG_HEADER((const sip_header_t *)mAs->as_response),
+                       SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
+        }
 	} else {
 		// Success
 		if (sip->sip_request->rq_method == sip_method_register) {
@@ -1038,23 +1058,6 @@ void Authentication::AuthenticationListener::finish() {
 		mModule->mCurrentAuthOp = NULL;
 	}
 	delete this;
-}
-
-void Authentication::AuthenticationListener::finishVerifyAlgos(const vector<passwd_algo_t> &pass) {
-	mAlgoUsed.remove_if([&pass](string algo) {
-		bool found = false;
-
-		for (const auto &password : pass) {
-			if (password.algo == algo) {
-				found = true;
-				break;
-			}
-		}
-
-		return !found;
-	});
-
-	finish();
 }
 
 int Authentication::AuthenticationListener::checkPasswordMd5(const char *passwd){
@@ -1173,6 +1176,54 @@ void Authentication::AuthenticationListener::onError() {
 	}
 	finish();
 }
+
+Authentication::CheckAlgosListener::CheckAlgosListener(AuthenticationListener *listener)
+: mAuthListener(listener)  {
+}
+
+void Authentication::CheckAlgosListener::finish() {
+    mAuthListener->finish();
+    delete this;
+}
+
+void Authentication::CheckAlgosListener::main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u) {
+    CheckAlgosListener **listenerStorage = (CheckAlgosListener **)su_msg_data(msg);
+    CheckAlgosListener *listener = *listenerStorage;
+    listener->finish();
+}
+
+void Authentication::CheckAlgosListener::onResult(AuthDbResult result, const string &passwd) {
+}
+
+void Authentication::CheckAlgosListener::onResult(AuthDbResult result, const vector<passwd_algo_t> &passwd) {
+
+    su_msg_r mamc = SU_MSG_R_INIT;
+    if (-1 == su_msg_create(mamc, su_root_task(mAuthListener->getRoot()), su_root_task(mAuthListener->getRoot()), main_thread_async_response_cb,
+                            sizeof(CheckAlgosListener *))) {
+        LOGF("Couldn't create auth async message");
+    }
+    CheckAlgosListener **listenerStorage = (CheckAlgosListener **)su_msg_data(mamc);
+    *listenerStorage = this;
+
+    // get algorothms really supported
+    mAuthListener->mAlgoUsed.remove_if([&passwd](string algo) {
+        bool found = false;
+
+        for (const auto &pass : passwd) {
+            if (pass.algo == algo) {
+                found = true;
+                break;
+            }
+        }
+
+        return !found;
+    });
+
+    if (-1 == su_msg_send(mamc)) {
+        LOGF("Couldn't send auth async message to main thread.");
+    }
+}
+
 
 #define PA "Authorization missing "
 
@@ -1311,9 +1362,11 @@ void Authentication::flexisip_auth_method_digest(auth_mod_t *am, auth_status_t *
 		if (listener->mImmediateRetrievePass) {
 			SLOGD << "Searching for " << as->as_user_uri->url_user
 			<< " password to have it when the authenticated request comes";
-			AuthDbBackend::get()->getPassword(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL);
-			//AuthDbBackend::get()->getPasswordForAlgo(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL, listener);
+            CheckAlgosListener *Algo_listener = new CheckAlgosListener(listener);
+			AuthDbBackend::get()->getPassword(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, Algo_listener);
+            return;
 		}
+
 		listener->finish();
 		return;
 	}

@@ -150,7 +150,7 @@ void SociAuthDB::reconnectSession(soci::session &session) {
 #define DURATION_MS(start, stop) (unsigned long) duration_cast<milliseconds>((stop) - (start)).count()
 
 void SociAuthDB::getPasswordWithPool(const std::string &id, const std::string &domain,
-									const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref) {
+									const std::string &authid, AuthDbListener *listener) {
 	steady_clock::time_point start;
 	steady_clock::time_point stop;
 
@@ -228,8 +228,6 @@ void SociAuthDB::getPasswordWithPool(const std::string &id, const std::string &d
 
 				passwd.push_back(pass);
 			}
-			
-			if(listener_ref) listener_ref->finishVerifyAlgos(passwd);
 			
 			stop = steady_clock::now();
 			SLOGD << "[SOCI] Got pass for " << id << " in " << DURATION_MS(start, stop) << "ms";
@@ -405,10 +403,10 @@ void SociAuthDB::getUsersWithPhonesWithPool(list<tuple<std::string,std::string,A
 #endif
 
 void SociAuthDB::getPasswordFromBackend(const std::string &id, const std::string &domain,
-										const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref) {
+										const std::string &authid, AuthDbListener *listener) {
 
 	// create a thread to grab a pool connection and use it to retrieve the auth information
-	auto func = bind(&SociAuthDB::getPasswordWithPool, this, id, domain, authid, listener, listener_ref);
+	auto func = bind(&SociAuthDB::getPasswordWithPool, this, id, domain, authid, listener);
 
 	bool success = thread_pool->Enqueue(func);
 	if (success == FALSE) {

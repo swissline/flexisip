@@ -132,9 +132,6 @@ private:
 			delete this;
 		}
 
-		virtual void finishVerifyAlgos(const vector<passwd_algo_t> &pass) {
-			return;
-		}
 	};
 
 	// Listener class NEED to copy the shared pointer

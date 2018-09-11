@@ -41,10 +41,6 @@ public:
 		belle_sip_object_unref(timer);
 	}
 
-	virtual void finishVerifyAlgos(const vector<passwd_algo_t> &pass) {
-		return;
-	}
-
 	void onResults(const list<string> &phones, const set<pair<string, string>> &presences) {
 		for(const string &phone : phones) {
 			if(presences.empty()) {
