@@ -54,6 +54,7 @@ set(FLEXISIP_SOURCES
 	mediarelay.cc
 	module-auth.cc
 	module-contact-route-inserter.cc
+	module-custom-authentication.cc
 	module-dos.cc
 	module-forward.cc
 	module-garbage-in.cc
@@ -93,6 +94,7 @@ set(FLEXISIP_SOURCES
 	transaction.cc
 	uac-register.cc
 	utils/httputils.cc
+	utils/string-formater.cc
 	utils/threadpool.cc
 )
 
