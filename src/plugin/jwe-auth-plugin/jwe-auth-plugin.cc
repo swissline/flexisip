@@ -310,7 +310,7 @@ namespace {
 	ModuleInfo<JweAuth> JweAuthInfo(
 		"JweAuth",
 		"This module offers the possibility to use JSON Web Encryption tokens.",
-		{ "Authentication" },
+		{ "CustomAuthentication" },
 		ModuleInfoBase::ModuleOid::Plugin
 	);
 }
