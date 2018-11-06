@@ -34,7 +34,7 @@ ModuleCustomAuthentication::ModuleCustomAuthentication(Agent *agent) noexcept : 
 	mEngine = nth_engine_create(mAgent->getRoot(), TAG_END());
 }
 
-ModuleCustomAuthentication::~ModuleCustomAuthentication() {
+ModuleCustomAuthentication::~ModuleCustomAuthentication() noexcept {
 	nth_engine_destroy(mEngine);
 }
 
