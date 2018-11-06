@@ -53,4 +53,5 @@ private:
 	std::map<nth_client_t *, std::shared_ptr<RequestSipEvent>> mPendingEvent;
 
 	static std::array<int, 4> mValidSipCodes;
+	static ModuleInfo<ModuleCustomAuthentication> mModuleInfo;
 };

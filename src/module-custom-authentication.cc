@@ -208,3 +208,10 @@ bool ModuleCustomAuthentication::validSipCode(int sipCode) {
 }
 
 std::array<int, 4> ModuleCustomAuthentication::mValidSipCodes = {200, 401, 407, 403};
+
+ModuleInfo<ModuleCustomAuthentication> ModuleCustomAuthentication::mModuleInfo(
+	"CustomAuthentication",
+	"Ask an HTTP server for authentication",
+	{ "Authentication" },
+	ModuleInfoBase::ModuleOid::CustomAuthentication
+);
