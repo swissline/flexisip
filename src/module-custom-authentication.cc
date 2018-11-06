@@ -44,6 +44,7 @@ void ModuleCustomAuthentication::onDeclare(GenericStruct *mc) noexcept {
 		config_item_end
 	};
 	mc->addChildrenValues(items);
+	mc->get<ConfigBoolean>("enabled")->setDefault("false");
 	mUriFormater.setTemplate(mc->get<ConfigString>("remote-auth-uri")->read());
 }
 
