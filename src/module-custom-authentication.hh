@@ -45,7 +45,7 @@ private:
 	std::map<std::string, std::string> extractParameters(const MsgSip &msg) const;
 	std::map<std::string, std::string> splitCommaSeparatedKeyValuesList(const std::string &kvList) const;
 
-	static int onHttpResponseCb(ModuleCustomAuthentication *module, nth_client_t *request, const http_t *http) noexcept;
+	static int onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) noexcept;
 	static std::string toString(const http_payload_t *httpPayload) noexcept;
 	static bool validSipCode(int sipCode);
 

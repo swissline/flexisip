@@ -65,7 +65,14 @@ void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev)
 	map<string, string> params = extractParameters(*ms);
 	string uri = mUriFormater.format(params);
 
-	nth_client_t *request = nth_client_tcreate(mEngine, nullptr, nullptr, http_method_get, "GET", URL_STRING_MAKE(uri.c_str()), TAG_END());
+	nth_client_t *request = nth_client_tcreate(mEngine,
+		onHttpResponseCb,
+		reinterpret_cast<nth_client_magic_t *>(this),
+		http_method_get,
+		"GET",
+		URL_STRING_MAKE(uri.c_str()),
+		TAG_END()
+	);
 	if (request == nullptr) {
 		SLOGE << "HTTP request for '" << uri << "' has failed";
 		ev->reply(500, "Internal error", TAG_END());
@@ -192,8 +199,10 @@ std::map<std::string, std::string> ModuleCustomAuthentication::splitCommaSeparat
 	return keyValues;
 }
 
-int ModuleCustomAuthentication::onHttpResponseCb(ModuleCustomAuthentication *module, nth_client_t *request, const http_t *http) noexcept {
-	module->onHttpResponse(request, http);
+int ModuleCustomAuthentication::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) noexcept {
+	try {
+		reinterpret_cast<ModuleCustomAuthentication *>(magic)->onHttpResponse(request, http);
+	} catch (...) {}
 	return 0;
 }
 
