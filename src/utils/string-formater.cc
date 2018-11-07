@@ -24,16 +24,17 @@ using namespace std;
 
 std::string StringFormater::format(const std::map<std::string, std::string> &values) const {
 	string result;
-	auto lastIt = mTemplate.cbegin();
+	auto it1 = mTemplate.cbegin();
 	do {
-		auto it1 = find(lastIt, mTemplate.cend(), '$');
+		auto it2 = find(it1, mTemplate.cend(), '$');
+		result.insert(result.end(), it1, it2);
+		it1 = it2;
 		if (it1 != mTemplate.cend()) {
-			result.insert(result.cend(), lastIt, it1-1);
-			auto it2 = find_if_not(++it1, mTemplate.cend(), isKeywordChar);
+			it2 = find_if_not(++it1, mTemplate.cend(), isKeywordChar);
 			result += values.at(string(it1, it2));
-			lastIt = (it2 != mTemplate.cend() ? it2+1 : it2);
+			it1 = it2;
 		}
-	} while (lastIt != mTemplate.cend());
+	} while (it1 != mTemplate.cend());
 	return result;
 }
 
