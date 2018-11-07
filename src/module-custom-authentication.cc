@@ -30,14 +30,6 @@ std::ostream &operator<<(std::ostream &os, const http_t *httpMessage) {
 	return os;
 }
 
-ModuleCustomAuthentication::ModuleCustomAuthentication(Agent *agent) noexcept : Module(agent) {
-	mEngine = nth_engine_create(mAgent->getRoot(), TAG_END());
-}
-
-ModuleCustomAuthentication::~ModuleCustomAuthentication() noexcept {
-	nth_engine_destroy(mEngine);
-}
-
 void ModuleCustomAuthentication::onDeclare(GenericStruct *mc) noexcept {
 	ConfigItemDescriptor items[] = {
 		{ String, "remote-auth-uri", "", "" },
@@ -45,7 +37,16 @@ void ModuleCustomAuthentication::onDeclare(GenericStruct *mc) noexcept {
 	};
 	mc->addChildrenValues(items);
 	mc->get<ConfigBoolean>("enabled")->setDefault("false");
-	mUriFormater.setTemplate(mc->get<ConfigString>("remote-auth-uri")->read());
+}
+
+void ModuleCustomAuthentication::onLoad(const GenericStruct *root) noexcept {
+	mEngine = nth_engine_create(mAgent->getRoot(), TAG_END());
+	mUriFormater.setTemplate(root->get<ConfigString>("remote-auth-uri")->read());
+}
+
+void ModuleCustomAuthentication::onUnload() noexcept {
+	nth_engine_destroy(mEngine);
+	mEngine = nullptr;
 }
 
 void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev) noexcept {

@@ -28,11 +28,12 @@
 
 class ModuleCustomAuthentication : public Module {
 public:
-	ModuleCustomAuthentication(Agent *agent) noexcept;
-	~ModuleCustomAuthentication() noexcept;
+	ModuleCustomAuthentication(Agent *agent) : Module(agent) {}
 
 private:
 	void onDeclare(GenericStruct *mc) noexcept override;
+	void onLoad(const GenericStruct *root) noexcept override;
+	void onUnload() noexcept override;
 	void onRequest(std::shared_ptr<RequestSipEvent> &ev) noexcept override;
 	void onResponse(std::shared_ptr<ResponseSipEvent> &ev) noexcept override {}
 
