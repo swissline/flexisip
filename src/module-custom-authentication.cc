@@ -52,46 +52,43 @@ void ModuleCustomAuthentication::onUnload() noexcept {
 }
 
 void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev) noexcept {
-	const shared_ptr<MsgSip> &ms = ev->getMsgSip();
-	sip_t *sip = ms->getSip();
-
-	// Do it first to make sure no transaction is created which
-	// would send an inappropriate 100 trying response.
-	if (sip->sip_request->rq_method == sip_method_ack || sip->sip_request->rq_method == sip_method_cancel ||
-		sip->sip_request->rq_method == sip_method_bye // same as in the sofia auth modules
-	) {
-		/*ack and cancel shall never be challenged according to the RFC.*/
-		return;
-	}
-
-	map<string, string> params = extractParameters(*ms);
-	string uri = mUriFormater.format(params);
-
-	nth_client_t *request = nth_client_tcreate(mEngine,
-		onHttpResponseCb,
-		reinterpret_cast<nth_client_magic_t *>(this),
-		http_method_get,
-		"GET",
-		URL_STRING_MAKE(uri.c_str()),
-		TAG_END()
-	);
-	if (request == nullptr) {
-		SLOGE << "HTTP request for '" << uri << "' has failed";
-		ev->reply(500, "Internal error", TAG_END());
-		return;
-	}
-
-	SLOGD << "HTTP request [" << request << "] to '" << uri << "' successfully sent";
-
 	try {
-		addPendingEvent(request, ev);
-	} catch (const logic_error &e) {
-		SLOGE << "HTTP request [" << request << "]: " << e.what();
-		ev->reply(500, "Internal error", TAG_END());
-		return;
-	}
+		const shared_ptr<MsgSip> &ms = ev->getMsgSip();
+		sip_t *sip = ms->getSip();
 
-	ev->suspendProcessing();
+		// Do it first to make sure no transaction is created which
+		// would send an inappropriate 100 trying response.
+		if (sip->sip_request->rq_method == sip_method_ack || sip->sip_request->rq_method == sip_method_cancel ||
+			sip->sip_request->rq_method == sip_method_bye // same as in the sofia auth modules
+		) {
+			/*ack and cancel shall never be challenged according to the RFC.*/
+			return;
+		}
+
+		map<string, string> params = extractParameters(*ms);
+		string uri = mUriFormater.format(params);
+
+		nth_client_t *request = nth_client_tcreate(mEngine,
+			onHttpResponseCb,
+			reinterpret_cast<nth_client_magic_t *>(this),
+			http_method_get,
+			"GET",
+			URL_STRING_MAKE(uri.c_str()),
+			TAG_END()
+		);
+		if (request == nullptr) {
+			ostringstream os;
+			os << "HTTP request for '" << uri << "' has failed";
+			throw runtime_error(os.str());
+		}
+
+		SLOGD << "HTTP request [" << request << "] to '" << uri << "' successfully sent";
+		addPendingEvent(request, ev);
+		ev->suspendProcessing();
+	} catch (const runtime_error &e) {
+		SLOGE << e.what();
+		ev->reply(500, "Internal error", TAG_END());
+	}
 }
 
 void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const http_t *http) noexcept {
@@ -169,10 +166,16 @@ std::shared_ptr<RequestSipEvent> ModuleCustomAuthentication::removePendingEvent(
 
 std::map<std::string, std::string> ModuleCustomAuthentication::extractParameters(const MsgSip &msg) const {
 	map<string, string> params;
-	sip_auth_t *authHeader = msg.getSip()->sip_authorization;
+	sip_auth_t *authHeader = msg.getSip()->sip_authorization ? msg.getSip()->sip_authorization : msg.getSip()->sip_proxy_authorization;
 	if (authHeader) {
-		params = splitCommaSeparatedKeyValuesList(*authHeader->au_params);
-		params["scheme"] = authHeader->au_scheme;
+		try {
+			params = splitCommaSeparatedKeyValuesList(*authHeader->au_params);
+			params["scheme"] = authHeader->au_scheme;
+		} catch (const invalid_argument &e) { // thrown by splitCommaSeparatedKeyValuesList()
+			ostringstream os;
+			os << "failed to extract parameters from '" << *authHeader->au_params << "': " << e.what();
+			throw runtime_error(os.str());
+		}
 	}
 	return params;
 }
