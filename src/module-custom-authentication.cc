@@ -32,7 +32,7 @@ std::ostream &operator<<(std::ostream &os, const http_payload_t *httpPayload) {
 	return os;
 }
 
-void ModuleCustomAuthentication::onDeclare(GenericStruct *mc) noexcept {
+void ModuleCustomAuthentication::onDeclare(GenericStruct *mc) {
 	ConfigItemDescriptor items[] = {
 		{ String, "remote-auth-uri", "", "" },
 		config_item_end
@@ -41,17 +41,17 @@ void ModuleCustomAuthentication::onDeclare(GenericStruct *mc) noexcept {
 	mc->get<ConfigBoolean>("enabled")->setDefault("false");
 }
 
-void ModuleCustomAuthentication::onLoad(const GenericStruct *root) noexcept {
+void ModuleCustomAuthentication::onLoad(const GenericStruct *root) {
 	mEngine = nth_engine_create(mAgent->getRoot(), TAG_END());
 	mUriFormater.setTemplate(root->get<ConfigString>("remote-auth-uri")->read());
 }
 
-void ModuleCustomAuthentication::onUnload() noexcept {
+void ModuleCustomAuthentication::onUnload() {
 	nth_engine_destroy(mEngine);
 	mEngine = nullptr;
 }
 
-void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev) noexcept {
+void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev) {
 	try {
 		const shared_ptr<MsgSip> &ms = ev->getMsgSip();
 		sip_t *sip = ms->getSip();
@@ -91,7 +91,7 @@ void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev)
 	}
 }
 
-void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const http_t *http) noexcept {
+void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const http_t *http) {
 	shared_ptr<RequestSipEvent> ev;
 	try {
 		int sipCode = 0;
@@ -204,14 +204,14 @@ std::map<std::string, std::string> ModuleCustomAuthentication::splitCommaSeparat
 	return keyValues;
 }
 
-int ModuleCustomAuthentication::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) noexcept {
+int ModuleCustomAuthentication::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) {
 	try {
 		reinterpret_cast<ModuleCustomAuthentication *>(magic)->onHttpResponse(request, http);
 	} catch (...) {}
 	return 0;
 }
 
-std::string ModuleCustomAuthentication::toString(const http_payload_t *httpPayload) noexcept {
+std::string ModuleCustomAuthentication::toString(const http_payload_t *httpPayload) {
 	if (httpPayload == nullptr || httpPayload->pl_data == nullptr || httpPayload->pl_len == 0) {
 		return string();
 	}

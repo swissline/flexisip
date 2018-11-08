@@ -31,13 +31,13 @@ public:
 	ModuleCustomAuthentication(Agent *agent) : Module(agent) {}
 
 private:
-	void onDeclare(GenericStruct *mc) noexcept override;
-	void onLoad(const GenericStruct *root) noexcept override;
-	void onUnload() noexcept override;
-	void onRequest(std::shared_ptr<RequestSipEvent> &ev) noexcept override;
-	void onResponse(std::shared_ptr<ResponseSipEvent> &ev) noexcept override {}
+	void onDeclare(GenericStruct *mc) override;
+	void onLoad(const GenericStruct *root) override;
+	void onUnload() override;
+	void onRequest(std::shared_ptr<RequestSipEvent> &ev) override;
+	void onResponse(std::shared_ptr<ResponseSipEvent> &ev) override {}
 
-	void onHttpResponse(nth_client_t *request, const http_t *http) noexcept;
+	void onHttpResponse(nth_client_t *request, const http_t *http);
 
 	void addPendingEvent(nth_client_t *request, const std::shared_ptr<RequestSipEvent> &ev);
 	std::shared_ptr<RequestSipEvent> removePendingEvent(nth_client_t *request);
@@ -45,8 +45,8 @@ private:
 	std::map<std::string, std::string> extractParameters(const MsgSip &msg) const;
 	std::map<std::string, std::string> splitCommaSeparatedKeyValuesList(const std::string &kvList) const;
 
-	static int onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) noexcept;
-	static std::string toString(const http_payload_t *httpPayload) noexcept;
+	static int onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http);
+	static std::string toString(const http_payload_t *httpPayload);
 	static bool validSipCode(int sipCode);
 
 	nth_engine_t *mEngine = nullptr;
