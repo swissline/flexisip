@@ -132,7 +132,7 @@ void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const htt
 		}
 
 		if (sipCode == 200) {
-			ev->restartProcessing();
+			getAgent()->injectRequestEvent(ev);
 		} else {
 			ev->reply(sipCode, reasonStr.c_str(), TAG_END());
 		}
