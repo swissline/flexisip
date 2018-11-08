@@ -133,8 +133,6 @@ void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const htt
 		} else {
 			ev->reply(sipCode, reasonStr.c_str(), TAG_END());
 		}
-	} catch (const logic_error &e) { // thrown by removePendingEvent()
-		SLOGE << e.what();
 	} catch (const runtime_error &e) {
 		SLOGE << "HTTP request [" << request << "]: " << e.what();
 		ev->reply(500, "Internal error", TAG_END());
