@@ -203,9 +203,14 @@ std::map<std::string, std::string> ModuleCustomAuthentication::splitCommaSeparat
 }
 
 int ModuleCustomAuthentication::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) {
+	const char *defaultErrMsg = "unhandled exception in C callback";
 	try {
 		reinterpret_cast<ModuleCustomAuthentication *>(magic)->onHttpResponse(request, http);
-	} catch (...) {}
+	} catch (std::exception &e) {
+		SLOGE << defaultErrMsg << ": " << e.what();
+	} catch (...) {
+		SLOGE << defaultErrMsg;
+	}
 	return 0;
 }
 
