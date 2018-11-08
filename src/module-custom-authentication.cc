@@ -24,9 +24,11 @@
 
 using namespace std;
 
-std::ostream &operator<<(std::ostream &os, const http_t *httpMessage) {
-	const msg_common_t *httpMessageBase = reinterpret_cast<const msg_common_t *>(httpMessage);
-	os.write(reinterpret_cast<const char *>(httpMessageBase->h_data), httpMessageBase->h_len);
+std::ostream &operator<<(std::ostream &os, const http_payload_t *httpPayload) {
+	const http_payload_t *httpPayloadBase = reinterpret_cast<const http_payload_t *>(httpPayload);
+	if (httpPayload->pl_data) {
+		os.write(reinterpret_cast<const char *>(httpPayloadBase->pl_data), httpPayloadBase->pl_len);
+	}
 	return os;
 }
 
@@ -107,10 +109,10 @@ void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const htt
 		}
 
 		int status = http->http_status->st_status;
-		SLOGD << "HTTP response received:" << endl << http;
+		SLOGD << "HTTP response received [" << status << "]: " << endl << http->http_payload;
 		if (status != 200) {
 			ostringstream os;
-			os << "unhandled status code [" << status << "]";
+			os << "unhandled HTTP status code [" << status << "]";
 			throw runtime_error(os.str());
 		}
 
@@ -125,7 +127,7 @@ void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const htt
 		is >> sipCode >> reasonStr;
 		if (!validSipCode(sipCode) || reasonStr.empty()) {
 			ostringstream os;
-			os << "invalid SIP code or reason (sipCode=" << sipCode << "), (reason=" << reasonStr << ")";
+			os << "invalid SIP code or reason (sipCode=" << sipCode << "), (reason='" << reasonStr << "')";
 			throw runtime_error(os.str());
 		}
 
