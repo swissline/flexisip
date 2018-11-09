@@ -95,12 +95,12 @@ void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const htt
 	shared_ptr<RequestSipEvent> ev;
 	try {
 		int sipCode = 0;
-		string reasonStr;
+		string reasonHeaderValue;
+		ostringstream os;
 
 		ev = removePendingEvent(request);
 
 		if (http == nullptr) {
-			ostringstream os;
 			os << "HTTP server responds with code " << nth_client_status(request);
 			throw runtime_error(os.str());
 		}
@@ -108,30 +108,34 @@ void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const htt
 		int status = http->http_status->st_status;
 		SLOGD << "HTTP response received [" << status << "]: " << endl << http->http_payload;
 		if (status != 200) {
-			ostringstream os;
 			os << "unhandled HTTP status code [" << status << "]";
 			throw runtime_error(os.str());
 		}
 
 		string httpBody = toString(http->http_payload);
 		if (httpBody.empty()) {
-			ostringstream os;
 			os << "HTTP server answered with an empty body";
 			throw runtime_error(os.str());
 		}
 
-		istringstream is(httpBody);
-		is >> sipCode >> reasonStr;
-		if (!validSipCode(sipCode) || reasonStr.empty()) {
-			ostringstream os;
-			os << "invalid SIP code or reason (sipCode=" << sipCode << "), (reason='" << reasonStr << "')";
+		try {
+			map<string, string> kv = parseHttpBody(httpBody);
+			sipCode = stoi(kv["Status"]);
+			reasonHeaderValue = move(kv["Reason"]);
+		} catch (const logic_error &e) {
+			os << "error while parsing HTTP body: " << e.what();
+			throw runtime_error(os.str());
+		}
+
+		if (!validSipCode(sipCode) || reasonHeaderValue.empty()) {
+			os << "invlaid SIP code or reason";
 			throw runtime_error(os.str());
 		}
 
 		if (sipCode == 200) {
 			getAgent()->injectRequestEvent(ev);
 		} else {
-			ev->reply(sipCode, reasonStr.c_str(), TAG_END());
+			ev->reply(sipCode, "", SIPTAG_REASON_STR(reasonHeaderValue.c_str()), TAG_END());
 		}
 	} catch (const runtime_error &e) {
 		SLOGE << "HTTP request [" << request << "]: " << e.what();
@@ -200,6 +204,34 @@ std::map<std::string, std::string> ModuleCustomAuthentication::splitCommaSeparat
 		keyPos = commaPos != kvList.cend() ? commaPos+1 : kvList.cend();
 	}
 	return keyValues;
+}
+
+std::map<std::string, std::string> ModuleCustomAuthentication::parseHttpBody(const std::string &body) const {
+	istringstream is(body);
+	ostringstream os;
+	map<string, string> result;
+	string line;
+
+	do {
+		getline(is, line);
+		if (line.empty()) continue;
+
+		auto column = find(line.cbegin(), line.cend(), ':');
+		if (column == line.cend()) {
+			os << "invalid line '" << line << "': missing column symbol";
+			throw invalid_argument(os.str());
+		}
+
+		string &value = result[string(line.cbegin(), column)];
+		auto valueStart = find_if_not(column+1, line.cend(), [](const char &c){return isspace(c) != 0;});
+		if (valueStart == line.cend()) {
+			os << "invalid line '" << line << "': missing value";
+			throw invalid_argument(os.str());
+		}
+
+		value.assign(valueStart, line.cend());
+	} while (!is.eof());
+	return result;
 }
 
 int ModuleCustomAuthentication::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) {
