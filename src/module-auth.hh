@@ -108,6 +108,12 @@ private:
 	private:
 		void processResponse();
 		static void main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u);
+		static std::string sha256(const std::string &data);
+		static std::string sha256(const void *data, size_t len);
+		static std::string toString(const std::vector<uint8_t> &data);
+		static std::string auth_digest_a1_for_algorithm(const auth_response_t *ar, const std::string &secret);
+		static std::string auth_digest_a1sess_for_algorithm(const auth_response_t *ar, const std::string &ha1);
+		static std::string auth_digest_response_for_algorithm(::auth_response_t *ar, char const *method_name, void const *data, isize_t dlen, const std::string &ha1);
 
 		friend class Authentication;
 		Authentication *mModule;

@@ -16,6 +16,9 @@
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <iomanip>
+#include <sstream>
+
 #include <assert.h>
 #include <regex.h>
 
@@ -33,7 +36,6 @@
 #include "module-auth.hh"
 
 using namespace std;
-class Authentication;
 
 struct auth_plugin_t {
 	su_root_t *mRoot;
@@ -49,82 +51,6 @@ struct auth_mod_size {
 	auth_mod_t mod[1];
 	auth_plugin_t plug[1];
 };
-
-void flexisipSha256(char* input, size_t size, uint8_t* a1buf, char* out){
-	size_t di;
-	bctbx_sha256((const unsigned char*)input, strlen(input),size, a1buf);
-	for (di = 0; di < size; ++di)
-		sprintf(out + di * 2, "%02x", a1buf[di]);
-	out[64]='\0';
-}
-
-void auth_digest_a1_for_algorithm(auth_response_t *ar,char const *secret,char* ha1) {
-	char input[100];
-	uint8_t a1buf[32];
-
-	snprintf(input,sizeof(input),"%s:%s:%s",ar->ar_username,ar->ar_realm,secret);
-	flexisipSha256(input, 32, a1buf, ha1);
-	LOGD("auth_digest_ha1() has A1 = SHA256(%s:%s:%s) = %s\n",
-		ar->ar_username,ar->ar_realm, "*******", ha1);
-}
-
-void auth_digest_a1sess_for_algorithm(auth_response_t *ar,char* ha1) {
-	char input[100];
-	uint8_t a1buf[32];
-	char* ha1_ref=ha1;
-
-	snprintf(input,sizeof(input),"%s:%s:%s",ha1,ar->ar_nonce,ar->ar_cnonce);
-	flexisipSha256(input, 32, a1buf, ha1);
-	LOGD("auth_sessionkey has A1' = SHA256(%s:%s:%s) = %s\n",
-		ha1_ref, ar->ar_nonce, ar->ar_cnonce, ha1);
-}
-
-void auth_digest_response_for_algorithm(auth_response_t *ar,
-										char const *method_name,
-										void const *data, isize_t dlen, char* response, const char* ha1){
-	char  input[200];
-	uint8_t a1buf[32];
-	char ha2[65],Hentity[65];
-	if (ar->ar_auth_int)
-		ar->ar_qop = "auth-int";
-	else if (ar->ar_auth)
-		ar->ar_qop = "auth";
-	else
-		ar->ar_qop = NULL;
-
-	/* Calculate Hentity */
-	if (ar->ar_auth_int) {
-		if (data && dlen) {
-			snprintf(input, sizeof(input), "%s", reinterpret_cast<const char *>(data));
-			flexisipSha256(input, 32, a1buf, Hentity);
-		} else {
-			strcpy(Hentity, "d7580069de562f5c7fd932cc986472669122da91a0f72f30ef1b20ad6e4f61a3");
-		}
-	}
-
-	/* Calculate A2 */
-	if (ar->ar_auth_int) {
-		snprintf(input, sizeof(input), "%s:%s:%s", method_name, ar->ar_uri, Hentity);
-	} else
-		snprintf(input, sizeof(input), "%s:%s", method_name, ar->ar_uri);
-	flexisipSha256(input, 32, a1buf, ha2);
-	LOGD("A2 = SHA256(%s:%s%s%s)\n", method_name, ar->ar_uri,
-	     ar->ar_auth_int ? ":" : "", ar->ar_auth_int ? Hentity : "");
-
-	/* Calculate response */
-	snprintf(input, sizeof(input), "%s:%s:%s:%s:%s:%s", ha1, ar->ar_nonce, ar->ar_nc, ar->ar_cnonce, ar->ar_qop, ha2);
-	flexisipSha256(input, 32, a1buf, response);
-	LOGD("auth_response: %s = SHA256(%s:%s%s%s%s%s%s%s:%s) (qop=%s)\n",
-	     response, ha1, ar->ar_nonce,
-	     ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
-	     ar->ar_auth ||  ar->ar_auth_int ? ar->ar_nc : "",
-	     ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
-	     ar->ar_auth ||  ar->ar_auth_int ? ar->ar_cnonce : "",
-	     ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
-	     ar->ar_auth ||  ar->ar_auth_int ? ar->ar_qop : "",
-	     ha2,
-	     ar->ar_qop ? ar->ar_qop : "NONE");
-}
 
 
 // ====================================================================================================================
@@ -404,26 +330,24 @@ int Authentication::AuthenticationListener::checkPasswordForAlgorithm(const char
 	if ((mAr.ar_algorithm == NULL) || (!strcmp(mAr.ar_algorithm, "MD5"))) {
 		return checkPasswordMd5(passwd);
 	} else if (!strcmp(mAr.ar_algorithm, "SHA-256")) {
-		char a1[65];
-		char response[65];
-
 		if (passwd && passwd[0] == '\0')
 			passwd = NULL;
 
+		string a1;
 		if (passwd) {
 			mPasswordFound = true;
 			++*getModule()->mCountPassFound;
-			strncpy(a1, passwd, 65); // remove trailing NULL character
+			a1 = passwd;
 		} else {
 			++*getModule()->mCountPassNotFound;
-			auth_digest_a1_for_algorithm(&mAr, "xyzzy", a1);
+			a1 = auth_digest_a1_for_algorithm(&mAr, "xyzzy");
 		}
 
 		if (mAr.ar_md5sess)
-			auth_digest_a1sess_for_algorithm(&mAr, a1);
+			a1 = auth_digest_a1sess_for_algorithm(&mAr, a1);
 
-		auth_digest_response_for_algorithm(&mAr, mAs->as_method, mAs->as_body, mAs->as_bodylen, response, a1);
-		return !passwd || strcmp(response, mAr.ar_response);
+		string response = auth_digest_response_for_algorithm(&mAr, mAs->as_method, mAs->as_body, mAs->as_bodylen, a1);
+		return (passwd && response == mAr.ar_response ? 0 : -1);
 	}
 	return -1;
 }
@@ -491,6 +415,99 @@ void Authentication::AuthenticationListener::onError() {
 		mAs->as_response = NULL;
 	}
 	finish();
+}
+
+std::string Authentication::AuthenticationListener::sha256(const std::string &data) {
+	const size_t hashLen = 32;
+	vector<uint8_t> hash(hashLen);
+	bctbx_sha256(reinterpret_cast<const uint8_t *>(data.c_str()), data.size(), hash.size(), hash.data());
+	return toString(hash);
+}
+
+std::string Authentication::AuthenticationListener::sha256(const void *data, size_t len) {
+	const size_t hashLen = 32;
+	vector<uint8_t> hash(hashLen);
+	bctbx_sha256(reinterpret_cast<const uint8_t *>(data), len, hash.size(), hash.data());
+	return toString(hash);
+}
+
+std::string Authentication::AuthenticationListener::toString(const std::vector<uint8_t> &data) {
+	ostringstream out;
+	out.str().reserve(data.size() * 2);
+	out << hex << setfill('0') << setw(2);
+	for (const uint8_t &byte : data) {
+		out << unsigned(byte);
+	}
+	return out.str();
+}
+
+std::string Authentication::AuthenticationListener::auth_digest_a1_for_algorithm(const ::auth_response_t *ar, const std::string &secret) {
+	ostringstream data;
+	data << ar->ar_username << ':' << ar->ar_realm << ':' << secret;
+	string ha1 = sha256(data.str());
+	SLOGD << "auth_digest_ha1() has A1 = SHA256(" << ar->ar_username << ':' << ar->ar_realm << ":*******) = " << ha1 << endl;
+	return ha1;
+}
+
+std::string Authentication::AuthenticationListener::auth_digest_a1sess_for_algorithm(const ::auth_response_t *ar, const std::string &ha1) {
+	ostringstream data;
+	data << ha1 << ':' << ar->ar_nonce << ':' << ar->ar_cnonce;
+	string newHa1 = sha256(data.str());
+	SLOGD << "auth_sessionkey has A1' = SHA256(" << data.str() << ") = " << newHa1 << endl;
+	return newHa1;
+}
+
+std::string Authentication::AuthenticationListener::auth_digest_response_for_algorithm(
+	::auth_response_t *ar,
+	char const *method_name,
+	void const *data,
+	isize_t dlen,
+	const std::string &ha1
+) {
+	if (ar->ar_auth_int)
+		ar->ar_qop = "auth-int";
+	else if (ar->ar_auth)
+		ar->ar_qop = "auth";
+	else
+		ar->ar_qop = NULL;
+
+	/* Calculate Hentity */
+	string Hentity;
+	if (ar->ar_auth_int) {
+		if (data && dlen) {
+			Hentity = sha256(data, dlen);
+		} else {
+			Hentity = "d7580069de562f5c7fd932cc986472669122da91a0f72f30ef1b20ad6e4f61a3";
+		}
+	}
+
+	/* Calculate A2 */
+	ostringstream input;
+	if (ar->ar_auth_int) {
+		input << method_name << ':' << ar->ar_uri << ':' << Hentity;
+	} else
+		input << method_name << ':' << ar->ar_uri;
+	string ha2 = sha256(input.str());
+	LOGD("A2 = SHA256(%s:%s%s%s)\n", method_name, ar->ar_uri,
+		 ar->ar_auth_int ? ":" : "", ar->ar_auth_int ? Hentity.c_str() : "");
+
+	/* Calculate response */
+	ostringstream input2;
+	input2 << ha1 << ':' << ar->ar_nonce << ':' << ar->ar_nc << ':' << ar->ar_cnonce << ':' << ar->ar_qop << ':' << ha2;
+	string response = sha256(input2.str());
+	LOGD("auth_response: %s = SHA256(%s:%s%s%s%s%s%s%s:%s) (qop=%s)\n",
+		response.c_str(), ha1.c_str(), ar->ar_nonce,
+		ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
+		ar->ar_auth ||  ar->ar_auth_int ? ar->ar_nc : "",
+		ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
+		ar->ar_auth ||  ar->ar_auth_int ? ar->ar_cnonce : "",
+		ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
+		ar->ar_auth ||  ar->ar_auth_int ? ar->ar_qop : "",
+		ha2.c_str(),
+		ar->ar_qop ? ar->ar_qop : "NONE"
+	);
+
+	return response;
 }
 
 // ====================================================================================================================
