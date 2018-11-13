@@ -129,16 +129,15 @@ void NonceStore::cleanExpired() {
 //  Authentication::AuthenticationListener class
 // ====================================================================================================================
 
-Authentication::AuthenticationListener::AuthenticationListener(Authentication *module, shared_ptr<RequestSipEvent> ev)
-: mModule(module), mEv(ev), mAm(NULL), mAs(NULL), mAch(NULL), mPasswordFound(false) {
-	memset(&mAr, '\0', sizeof(mAr)), mAr.ar_size = sizeof(mAr);
-	mNo403 = false;
+Authentication::AuthenticationListener::AuthenticationListener(Authentication *module, shared_ptr<RequestSipEvent> ev) : mModule(module), mEv(ev) {
+	memset(&mAr, '\0', sizeof(mAr));
+	mAr.ar_size = sizeof(mAr);
 }
 
 void Authentication::AuthenticationListener::setData(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach) {
-	this->mAm = am;
-	this->mAs = as;
-	this->mAch = ach;
+	mAm = am;
+	mAs = as;
+	mAch = ach;
 }
 
 void Authentication::AuthenticationListener::main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u) {
@@ -517,8 +516,7 @@ std::string Authentication::AuthenticationListener::auth_digest_response_for_alg
 //  Authentication class
 // ====================================================================================================================
 
-Authentication::Authentication(Agent *ag) : Module(ag), mCountAsyncRetrieve(NULL), mCountSyncRetrieve(NULL) {
-	mNewAuthOn407 = false;
+Authentication::Authentication(Agent *ag) : Module(ag) {
 	mProxyChallenger.ach_status = 407; /*SIP_407_PROXY_AUTH_REQUIRED*/
 	mProxyChallenger.ach_phrase = sip_407_Proxy_auth_required;
 	mProxyChallenger.ach_header = sip_proxy_authenticate_class;
@@ -541,8 +539,6 @@ Authentication::Authentication(Agent *ag) : Module(ag), mCountAsyncRetrieve(NULL
 	if (auth_mod_register_plugin(mOdbcAuthScheme)) {
 		LOGE("Cannot register auth plugin");
 	}
-	mCurrentAuthOp = NULL;
-	mRequiredSubjectCheckSet = false;
 }
 
 Authentication::~Authentication() {
@@ -645,7 +641,6 @@ void Authentication::onDeclare(GenericStruct *mc) {
 void Authentication::onLoad(const GenericStruct *mc) {
 	mDomains = mc->get<ConfigStringList>("auth-domains")->read();
 	loadTrustedHosts(*mc->get<ConfigStringList>("trusted-hosts"));
-	mImmediateRetrievePassword = true;
 	mNewAuthOn407 = mc->get<ConfigBoolean>("new-auth-on-407")->read();
 	mTrustedClientCertificates = mc->get<ConfigStringList>("trusted-client-certificates")->read();
 	mTrustDomainCertificates = mc->get<ConfigBoolean>("trust-domain-certificates")->read();

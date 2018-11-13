@@ -32,7 +32,6 @@
 
 class NonceStore {
 public:
-	NonceStore() : mNonceExpires(3600) {}
 	void setNonceExpires(int value) {mNonceExpires = value;}
 	int getNc(const std::string &nonce);
 	void insert(msg_header_t *response);
@@ -51,22 +50,22 @@ private:
 
 	std::map<std::string, NonceCount> mNc;
 	std::mutex mMutex;
-	int mNonceExpires;
+	int mNonceExpires = 3600;
 };
 
 class Authentication : public Module {
 public:
-	StatCounter64 *mCountAsyncRetrieve;
-	StatCounter64 *mCountSyncRetrieve;
-	StatCounter64 *mCountPassFound;
-	StatCounter64 *mCountPassNotFound;
+	StatCounter64 *mCountAsyncRetrieve = nullptr;
+	StatCounter64 *mCountSyncRetrieve = nullptr;
+	StatCounter64 *mCountPassFound = nullptr;
+	StatCounter64 *mCountPassNotFound = nullptr;
 	NonceStore mNonceStore;
 
 	Authentication(Agent *ag);
-	~Authentication();
+	~Authentication() override;
 
-	virtual void onDeclare(GenericStruct *mc);
-	void onLoad(const GenericStruct *mc);
+	void onDeclare(GenericStruct *mc) override;
+	void onLoad(const GenericStruct *mc) override;
 	auth_mod_t *findAuthModule(const std::string name);
 	auth_mod_t *createAuthModule(const std::string &domain, int nonceExpires);
 	static bool containsDomain(const std::list<std::string> &d, const char *name);
@@ -74,32 +73,32 @@ public:
 	bool isTrustedPeer(std::shared_ptr<RequestSipEvent> &ev);
 	bool tlsClientCertificatePostCheck(const std::shared_ptr<RequestSipEvent> &ev);
 	bool handleTlsClientAuthentication(std::shared_ptr<RequestSipEvent> &ev);
-	void onRequest(std::shared_ptr<RequestSipEvent> &ev);
-	void onResponse(std::shared_ptr<ResponseSipEvent> &ev);
-	void onIdle() {mNonceStore.cleanExpired();}
-	virtual bool doOnConfigStateChanged(const ConfigValue &conf, ConfigState state);
+	void onRequest(std::shared_ptr<RequestSipEvent> &ev) override;
+	void onResponse(std::shared_ptr<ResponseSipEvent> &ev) override;
+	void onIdle() override {mNonceStore.cleanExpired();}
+	bool doOnConfigStateChanged(const ConfigValue &conf, ConfigState state) override;
 
 private:
 	class AuthenticationListener : public AuthDbListener {
 	public:
-		bool mImmediateRetrievePass;
-		bool mNo403;
+		bool mImmediateRetrievePass = false;
+		bool mNo403 = false;
 		std::list<std::string> mAlgoUsed;
 		auth_response_t mAr;
 
 		AuthenticationListener(Authentication *, std::shared_ptr<RequestSipEvent>);
-		virtual ~AuthenticationListener() = default;
+		~AuthenticationListener() override = default;
 
 		void setData(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach);
 		void checkPassword(const char *password);
 		int checkPasswordMd5(const char *password);
 		int checkPasswordForAlgorithm(const char *password);
-		void onResult(AuthDbResult result, const std::string &passwd);
-		void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd);
+		void onResult(AuthDbResult result, const std::string &passwd) override;
+		void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd) override;
 		void onError();
 		void finish(); /*the listener is destroyed when calling this, careful*/
 		void finishForAlgorithm();
-		void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass);
+		void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass) override;
 
 		su_root_t *getRoot() {return getAgent()->getRoot();}
 		Agent *getAgent() {return mModule->getAgent();}
@@ -116,12 +115,12 @@ private:
 		static std::string auth_digest_response_for_algorithm(::auth_response_t *ar, char const *method_name, void const *data, isize_t dlen, const std::string &ha1);
 
 		friend class Authentication;
-		Authentication *mModule;
+		Authentication *mModule = nullptr;
 		std::shared_ptr<RequestSipEvent> mEv;
-		auth_mod_t *mAm;
-		auth_status_t *mAs;
-		auth_challenger_t const *mAch;
-		bool mPasswordFound;
+		auth_mod_t *mAm = nullptr;
+		auth_status_t *mAs = nullptr;
+		const auth_challenger_t *mAch = nullptr;
+		bool mPasswordFound = false;
 		AuthDbResult mResult;
 		std::string mPassword;
 	};
@@ -144,14 +143,14 @@ private:
 	regex_t mRequiredSubject;
 	auth_challenger_t mRegistrarChallenger;
 	auth_challenger_t mProxyChallenger;
-	auth_scheme_t *mOdbcAuthScheme;
+	auth_scheme_t *mOdbcAuthScheme = nullptr;
 	std::shared_ptr<BooleanExpression> mNo403Expr;
-	AuthenticationListener *mCurrentAuthOp;
-	bool mImmediateRetrievePassword;
-	bool mNewAuthOn407;
-	bool mTestAccountsEnabled;
-	bool mDisableQOPAuth;
-	bool mRequiredSubjectCheckSet;
-	bool mRejectWrongClientCertificates;
-	bool mTrustDomainCertificates;
+	AuthenticationListener *mCurrentAuthOp = nullptr;
+	bool mImmediateRetrievePassword = true;
+	bool mNewAuthOn407 = false;
+	bool mTestAccountsEnabled = false;
+	bool mDisableQOPAuth = false;
+	bool mRequiredSubjectCheckSet = false;
+	bool mRejectWrongClientCertificates = false;
+	bool mTrustDomainCertificates = false;
 };
