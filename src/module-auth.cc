@@ -1088,58 +1088,59 @@ void Authentication::flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *a
 		((ar->ar_auth && !strcasecmp(ar->ar_qop, "auth") && !strcasecmp(ar->ar_qop, "\"auth\"")) ||
 		(ar->ar_auth_int && !strcasecmp(ar->ar_qop, "auth-int") && !strcasecmp(ar->ar_qop, "\"auth-int\""))) &&
 		(phrase = PA "has invalid qop"))) {
+
 		// assert(phrase);
 		LOGD("auth_method_digest: 400 %s", phrase);
-	as->as_status = 400, as->as_phrase = phrase;
-	as->as_response = NULL;
-	listener->finish();
-	return;
-		}
+		as->as_status = 400, as->as_phrase = phrase;
+		as->as_response = NULL;
+		listener->finish();
+		return;
+	}
 
-		if (!ar->ar_username || !as->as_user_uri->url_user || !ar->ar_realm || !as->as_user_uri->url_host) {
-			as->as_status = 403, as->as_phrase = "Authentication info missing";
-			SLOGUE << "Registration failure, authentication info are missing: usernames " <<
-			ar->ar_username << "/" << as->as_user_uri->url_user << ", hosts " << ar->ar_realm << "/" << as->as_user_uri->url_host;
-			LOGD("from and authentication usernames [%s/%s] or from and authentication hosts [%s/%s] empty",
-				 ar->ar_username, as->as_user_uri->url_user, ar->ar_realm, as->as_user_uri->url_host);
-			as->as_response = NULL;
-			listener->finish();
-			return;
-		}
+	if (!ar->ar_username || !as->as_user_uri->url_user || !ar->ar_realm || !as->as_user_uri->url_host) {
+		as->as_status = 403, as->as_phrase = "Authentication info missing";
+		SLOGUE << "Registration failure, authentication info are missing: usernames " <<
+		ar->ar_username << "/" << as->as_user_uri->url_user << ", hosts " << ar->ar_realm << "/" << as->as_user_uri->url_host;
+		LOGD("from and authentication usernames [%s/%s] or from and authentication hosts [%s/%s] empty",
+				ar->ar_username, as->as_user_uri->url_user, ar->ar_realm, as->as_user_uri->url_host);
+		as->as_response = NULL;
+		listener->finish();
+		return;
+	}
 
-		Authentication *module = listener->getModule();
-		msg_time_t now = msg_now();
-		if (as->as_nonce_issued == 0 /* Already validated nonce */ && auth_validate_digest_nonce(am, as, ar, now) < 0) {
+	Authentication *module = listener->getModule();
+	msg_time_t now = msg_now();
+	if (as->as_nonce_issued == 0 /* Already validated nonce */ && auth_validate_digest_nonce(am, as, ar, now) < 0) {
+		as->as_blacklist = am->am_blacklist;
+		auth_challenge_digest(am, as, ach);
+		module->mNonceStore.insert(as->as_response);
+		listener->finish();
+		return;
+	}
+
+	if (as->as_stale) {
+		auth_challenge_digest(am, as, ach);
+		module->mNonceStore.insert(as->as_response);
+		listener->finish();
+		return;
+	}
+
+	if (!listener->mModule->mDisableQOPAuth) {
+		int pnc = module->mNonceStore.getNc(ar->ar_nonce);
+		int nnc = (int)strtoul(ar->ar_nc, NULL, 16);
+		if (pnc == -1 || pnc >= nnc) {
+			LOGE("Bad nonce count %d -> %d for %s", pnc, nnc, ar->ar_nonce);
 			as->as_blacklist = am->am_blacklist;
 			auth_challenge_digest(am, as, ach);
 			module->mNonceStore.insert(as->as_response);
 			listener->finish();
 			return;
+		} else {
+			module->mNonceStore.updateNc(ar->ar_nonce, nnc);
 		}
+	}
 
-		if (as->as_stale) {
-			auth_challenge_digest(am, as, ach);
-			module->mNonceStore.insert(as->as_response);
-			listener->finish();
-			return;
-		}
-
-		if (!listener->mModule->mDisableQOPAuth) {
-			int pnc = module->mNonceStore.getNc(ar->ar_nonce);
-			int nnc = (int)strtoul(ar->ar_nc, NULL, 16);
-			if (pnc == -1 || pnc >= nnc) {
-				LOGE("Bad nonce count %d -> %d for %s", pnc, nnc, ar->ar_nonce);
-				as->as_blacklist = am->am_blacklist;
-				auth_challenge_digest(am, as, ach);
-				module->mNonceStore.insert(as->as_response);
-				listener->finish();
-				return;
-			} else {
-				module->mNonceStore.updateNc(ar->ar_nonce, nnc);
-			}
-		}
-
-		AuthDbBackend::get()->getPassword(as->as_user_uri->url_user, as->as_user_uri->url_host, ar->ar_username, listener);
+	AuthDbBackend::get()->getPassword(as->as_user_uri->url_user, as->as_user_uri->url_host, ar->ar_username, listener);
 }
 
 /**
