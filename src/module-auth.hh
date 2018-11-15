@@ -27,6 +27,7 @@
 
 #include <sofia-sip/msg_types.h>
 
+#include "auth/auth-module-wrapper.hh"
 #include "authdb.hh"
 #include "module.hh"
 
@@ -53,6 +54,70 @@ private:
 	int mNonceExpires = 3600;
 };
 
+class OdbcAuthModule : public AuthModuleWrapper {
+public:
+	OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo);
+	OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo, int nonceExpire);
+	~OdbcAuthModule() override = default;
+
+private:
+	void onCheck(auth_status_t *as, msg_auth_t *credentials, auth_challenger_t const *ach) override;
+	void onChallenge(auth_status_t *as, auth_challenger_t const *ach) override;
+	void onCancel(auth_status_t *as) override;
+
+	void flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *as, auth_response_t *ar, auth_challenger_t const *ach);
+
+	bool mDisableQOPAuth = false;
+};
+
+class Authentication;
+
+class AuthenticationListener : public AuthDbListener {
+public:
+	bool mImmediateRetrievePass = false;
+	bool mNo403 = false;
+	std::list<std::string> mAlgoUsed;
+	auth_response_t mAr;
+
+	AuthenticationListener(Authentication *, std::shared_ptr<RequestSipEvent>);
+	~AuthenticationListener() override = default;
+
+	void setData(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach);
+	void checkPassword(const char *password);
+	int checkPasswordMd5(const char *password);
+	int checkPasswordForAlgorithm(const char *password);
+	void onResult(AuthDbResult result, const std::string &passwd) override;
+	void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd) override;
+	void onError();
+	void finish(); /*the listener is destroyed when calling this, careful*/
+	void finishForAlgorithm();
+	void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass) override;
+
+	su_root_t *getRoot() {return getAgent()->getRoot();}
+	Agent *getAgent() const;
+	Authentication *getModule() {return mModule;}
+
+private:
+	void processResponse();
+	static void main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u);
+	static std::string sha256(const std::string &data);
+	static std::string sha256(const void *data, size_t len);
+	static std::string toString(const std::vector<uint8_t> &data);
+	static std::string auth_digest_a1_for_algorithm(const auth_response_t *ar, const std::string &secret);
+	static std::string auth_digest_a1sess_for_algorithm(const auth_response_t *ar, const std::string &ha1);
+	static std::string auth_digest_response_for_algorithm(::auth_response_t *ar, char const *method_name, void const *data, isize_t dlen, const std::string &ha1);
+
+	friend class Authentication;
+	Authentication *mModule = nullptr;
+	std::shared_ptr<RequestSipEvent> mEv;
+	auth_mod_t *mAm = nullptr;
+	auth_status_t *mAs = nullptr;
+	const auth_challenger_t *mAch = nullptr;
+	bool mPasswordFound = false;
+	AuthDbResult mResult;
+	std::string mPassword;
+};
+
 class Authentication : public Module {
 public:
 	StatCounter64 *mCountAsyncRetrieve = nullptr;
@@ -66,8 +131,7 @@ public:
 
 	void onDeclare(GenericStruct *mc) override;
 	void onLoad(const GenericStruct *mc) override;
-	auth_mod_t *findAuthModule(const std::string name);
-	auth_mod_t *createAuthModule(const std::string &domain, int nonceExpires);
+	OdbcAuthModule *findAuthModule(const std::string name);
 	static bool containsDomain(const std::list<std::string> &d, const char *name);
 	bool handleTestAccountCreationRequests(std::shared_ptr<RequestSipEvent> &ev);
 	bool isTrustedPeer(std::shared_ptr<RequestSipEvent> &ev);
@@ -79,62 +143,13 @@ public:
 	bool doOnConfigStateChanged(const ConfigValue &conf, ConfigState state) override;
 
 private:
-	class AuthenticationListener : public AuthDbListener {
-	public:
-		bool mImmediateRetrievePass = false;
-		bool mNo403 = false;
-		std::list<std::string> mAlgoUsed;
-		auth_response_t mAr;
-
-		AuthenticationListener(Authentication *, std::shared_ptr<RequestSipEvent>);
-		~AuthenticationListener() override = default;
-
-		void setData(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach);
-		void checkPassword(const char *password);
-		int checkPasswordMd5(const char *password);
-		int checkPasswordForAlgorithm(const char *password);
-		void onResult(AuthDbResult result, const std::string &passwd) override;
-		void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd) override;
-		void onError();
-		void finish(); /*the listener is destroyed when calling this, careful*/
-		void finishForAlgorithm();
-		void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass) override;
-
-		su_root_t *getRoot() {return getAgent()->getRoot();}
-		Agent *getAgent() {return mModule->getAgent();}
-		Authentication *getModule() {return mModule;}
-
-	private:
-		void processResponse();
-		static void main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u);
-		static std::string sha256(const std::string &data);
-		static std::string sha256(const void *data, size_t len);
-		static std::string toString(const std::vector<uint8_t> &data);
-		static std::string auth_digest_a1_for_algorithm(const auth_response_t *ar, const std::string &secret);
-		static std::string auth_digest_a1sess_for_algorithm(const auth_response_t *ar, const std::string &ha1);
-		static std::string auth_digest_response_for_algorithm(::auth_response_t *ar, char const *method_name, void const *data, isize_t dlen, const std::string &ha1);
-
-		friend class Authentication;
-		Authentication *mModule = nullptr;
-		std::shared_ptr<RequestSipEvent> mEv;
-		auth_mod_t *mAm = nullptr;
-		auth_status_t *mAs = nullptr;
-		const auth_challenger_t *mAch = nullptr;
-		bool mPasswordFound = false;
-		AuthDbResult mResult;
-		std::string mPassword;
-	};
-
-	static int authPluginInit(auth_mod_t *am, auth_scheme_t *base, su_root_t *root, tag_type_t tag, tag_value_t value, ...);
 	bool empty(const char *value) {return value == NULL || value[0] == '\0';}
-	void static flexisip_auth_method_digest(auth_mod_t *am, auth_status_t *as, msg_auth_t *au, auth_challenger_t const *ach);
-	void static flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *as, auth_response_t *ar, auth_challenger_t const *ach);
 	const char *findIncomingSubjectInTrusted(std::shared_ptr<RequestSipEvent> &ev, const char *fromDomain);
 	void loadTrustedHosts(const ConfigStringList &trustedHosts);
 
 	const GenericStruct *presenceSection = GenericManager::get()->getRoot()->get<GenericStruct>("module::Presence");
 	static ModuleInfo<Authentication> sInfo;
-	std::map<std::string, auth_mod_t *> mAuthModules;
+	std::map<std::string, std::unique_ptr<OdbcAuthModule>> mAuthModules;
 	std::list<std::string> mDomains;
 	std::list<BinaryIp> mTrustedHosts;
 	std::list<std::string> mTrustedClientCertificates;
@@ -143,7 +158,6 @@ private:
 	regex_t mRequiredSubject;
 	auth_challenger_t mRegistrarChallenger;
 	auth_challenger_t mProxyChallenger;
-	auth_scheme_t *mOdbcAuthScheme = nullptr;
 	std::shared_ptr<BooleanExpression> mNo403Expr;
 	AuthenticationListener *mCurrentAuthOp = nullptr;
 	bool mImmediateRetrievePassword = true;
@@ -153,4 +167,6 @@ private:
 	bool mRequiredSubjectCheckSet = false;
 	bool mRejectWrongClientCertificates = false;
 	bool mTrustDomainCertificates = false;
+
+	friend AuthenticationListener;
 };

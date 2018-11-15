@@ -35,6 +35,8 @@ protected:
 	virtual void onChallenge(auth_status_t *as, auth_challenger_t const *ach) = 0;
 	virtual void onCancel(auth_status_t *as) = 0;
 
+	auth_mod_t *mAm = nullptr;
+
 private:
 	static void checkCb(auth_mod_t *am, auth_status_t *as, msg_auth_t *auth, auth_challenger_t const *ch) noexcept;
 	static void challengeCb(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach) noexcept;
@@ -45,6 +47,4 @@ private:
 	static const char *sMethodName;
 	static auth_scheme_t sAuthScheme;
 	static bool sSchemeRegistered;
-
-	auth_mod_t *mAm = nullptr;
 };
