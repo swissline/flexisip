@@ -187,7 +187,7 @@ void OdbcAuthModule::onCheck(auth_status_t *as, msg_auth_t *au, auth_challenger_
 
 		// Retrieve the password in the hope it will be in cache when the remote UAC
 		// sends back its request; this time with the expected authentication credentials.
-		if (listener->mImmediateRetrievePass) {
+		if (mImmediateRetrievePass) {
 			SLOGD << "Searching for " << as->as_user_uri->url_user
 			<< " password to have it when the authenticated request comes";
 			AuthDbBackend::get()->getPassword(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL);
@@ -392,7 +392,8 @@ void AuthenticationListener::onResult(AuthDbResult result, const string &passwd)
 }
 
 void AuthenticationListener::finishForAlgorithm () {
-	if ((mAlgoUsed.size() > 1) && (mAs->as_status == 401)) {
+	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
+	if ((extraData->mAlgoUsed.size() > 1) && (mAs->as_status == 401)) {
 		msg_header_t* response;
 		response = msg_header_copy(mAs->as_home, mAs->as_response);
 		msg_header_remove_param((msg_common_t *)response, "algorithm=MD5");
@@ -448,7 +449,8 @@ void AuthenticationListener::finish() {
 }
 
 void AuthenticationListener::finishVerifyAlgos(const vector<passwd_algo_t> &pass) {
-	mAlgoUsed.remove_if([&pass](string algo) {
+	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
+	extraData->mAlgoUsed.remove_if([&pass](string algo) {
 		bool found = false;
 
 		for (const auto &password : pass) {
@@ -522,8 +524,9 @@ int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
  * NULL if passwd not found.
  */
 void AuthenticationListener::checkPassword(const char *passwd) {
+	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
 	if (checkPasswordForAlgorithm(passwd)) {
-		if (mAm->am_forbidden && !mNo403) {
+		if (mAm->am_forbidden && !extraData->mNo403) {
 			mAs->as_status = 403, mAs->as_phrase = "Forbidden";
 			mAs->as_response = NULL;
 			mAs->as_blacklist = mAm->am_blacklist;
@@ -1065,11 +1068,12 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 	if (sip->sip_payload)
 		as->as_body = sip->sip_payload->pl_data, as->as_bodylen = sip->sip_payload->pl_len;
 
-	AuthenticationListener *listener = new AuthenticationListener(this, ev);
-	listener->mImmediateRetrievePass = mImmediateRetrievePassword;
-	listener->mNo403 = mNo403Expr->eval(ev->getSip());
-	listener->mAlgoUsed = mAlgorithms;
-	as->as_magic = mCurrentAuthOp = listener;
+	auto *data = new OdbcAuthModule::ExtraData();
+	data->mNo403 = mNo403Expr->eval(ev->getSip());
+	data->mAlgoUsed = mAlgorithms;
+	as->as_plugin = reinterpret_cast<auth_splugin_t *>(data);
+
+	as->as_magic = new AuthenticationListener(this, ev);
 
 	// Attention: the auth_mod_verify method should not send by itself any message but
 	// return after having set the as status and phrase.

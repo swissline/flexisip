@@ -56,6 +56,11 @@ private:
 
 class OdbcAuthModule : public AuthModuleWrapper {
 public:
+	struct ExtraData {
+		bool mNo403 = false;
+		std::list<std::string> mAlgoUsed;
+	};
+
 	OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo);
 	OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo, int nonceExpire);
 	~OdbcAuthModule() override = default;
@@ -68,15 +73,13 @@ private:
 	void flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *as, auth_response_t *ar, auth_challenger_t const *ach);
 
 	bool mDisableQOPAuth = false;
+	bool mImmediateRetrievePass = true;
 };
 
 class Authentication;
 
 class AuthenticationListener : public AuthDbListener {
 public:
-	bool mImmediateRetrievePass = false;
-	bool mNo403 = false;
-	std::list<std::string> mAlgoUsed;
 	auth_response_t mAr;
 
 	AuthenticationListener(Authentication *, std::shared_ptr<RequestSipEvent>);
@@ -160,7 +163,6 @@ private:
 	auth_challenger_t mProxyChallenger;
 	std::shared_ptr<BooleanExpression> mNo403Expr;
 	AuthenticationListener *mCurrentAuthOp = nullptr;
-	bool mImmediateRetrievePassword = true;
 	bool mNewAuthOn407 = false;
 	bool mTestAccountsEnabled = false;
 	bool mDisableQOPAuth = false;
