@@ -29,7 +29,7 @@
 using namespace std;
 
 struct auth_plugin_t {
-	AuthModuleWrapper *backPtr;
+	AuthModule *backPtr;
 };
 
 struct auth_mod_plugin_t {
@@ -37,7 +37,7 @@ struct auth_mod_plugin_t {
 	auth_plugin_t plugin[1];
 };
 
-AuthModuleWrapper::AuthModuleWrapper(su_root_t *root, tag_type_t tag, tag_value_t value, ...) {
+AuthModule::AuthModule(su_root_t *root, tag_type_t tag, tag_value_t value, ...) {
 	ta_list ta;
 
 	registerScheme();
@@ -55,19 +55,22 @@ AuthModuleWrapper::AuthModuleWrapper(su_root_t *root, tag_type_t tag, tag_value_
 	(AUTH_PLUGIN(mAm))->backPtr = this;
 }
 
-void AuthModuleWrapper::checkCb(auth_mod_t *am, auth_status_t *as, msg_auth_t *auth, auth_challenger_t const *ch) noexcept {
-	(AUTH_PLUGIN(am))->backPtr->onCheck(as, auth, ch);
+void AuthModule::checkCb(auth_mod_t *am, auth_status_t *as, msg_auth_t *auth, auth_challenger_t const *ch) noexcept {
+	AuthStatus &authStatus = *reinterpret_cast<AuthStatus *>(as->as_plugin);
+	(AUTH_PLUGIN(am))->backPtr->onCheck(authStatus, auth, ch);
 }
 
-void AuthModuleWrapper::challengeCb(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach) noexcept {
-	(AUTH_PLUGIN(am))->backPtr->onChallenge(as, ach);
+void AuthModule::challengeCb(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach) noexcept {
+	AuthStatus &authStatus = *reinterpret_cast<AuthStatus *>(as->as_plugin);
+	(AUTH_PLUGIN(am))->backPtr->onChallenge(authStatus, ach);
 }
 
-void AuthModuleWrapper::cancelCb(auth_mod_t *am, auth_status_t *as) noexcept {
-	(AUTH_PLUGIN(am))->backPtr->onCancel(as);
+void AuthModule::cancelCb(auth_mod_t *am, auth_status_t *as) noexcept {
+	AuthStatus &authStatus = *reinterpret_cast<AuthStatus *>(as->as_plugin);
+	(AUTH_PLUGIN(am))->backPtr->onCancel(authStatus);
 }
 
-void AuthModuleWrapper::registerScheme() {
+void AuthModule::registerScheme() {
 	if (!sSchemeRegistered) {
 		if (auth_mod_register_plugin(&sAuthScheme) != 0) {
 			ostringstream os;
@@ -77,9 +80,9 @@ void AuthModuleWrapper::registerScheme() {
 	}
 }
 
-const char *AuthModuleWrapper::sMethodName = "flexisip";
+const char *AuthModule::sMethodName = "flexisip";
 
-auth_scheme_t AuthModuleWrapper::sAuthScheme = {
+auth_scheme_t AuthModule::sAuthScheme = {
 	sMethodName,
 	sizeof(auth_mod_plugin_t),
 	auth_init_default,
@@ -89,4 +92,4 @@ auth_scheme_t AuthModuleWrapper::sAuthScheme = {
 	auth_destroy_default
 };
 
-bool AuthModuleWrapper::sSchemeRegistered = false;
+bool AuthModule::sSchemeRegistered = false;

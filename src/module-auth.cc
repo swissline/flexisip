@@ -113,7 +113,7 @@ void NonceStore::cleanExpired() {
 // ====================================================================================================================
 
 OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo):
-	AuthModuleWrapper(root,
+	AuthModule(root,
 		AUTHTAG_REALM(domain.c_str()),
 		AUTHTAG_OPAQUE("+GNywA=="),
 		AUTHTAG_FORBIDDEN(1),
@@ -125,7 +125,7 @@ OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const
 }
 
 OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo, int nonceExpire):
-	AuthModuleWrapper(root,
+	AuthModule(root,
 		AUTHTAG_REALM(domain.c_str()),
 		AUTHTAG_OPAQUE("+GNywA=="),
 		AUTHTAG_FORBIDDEN(1),
@@ -137,13 +137,13 @@ OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const
 	) {
 }
 
-void OdbcAuthModule::onCheck(auth_status_t *as, msg_auth_t *au, auth_challenger_t const *ach) {
-	AuthenticationListener *listener = (AuthenticationListener *)as->as_magic;
-	listener->setData(mAm, as, ach);
+void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t const *ach) {
+	AuthenticationListener *listener = (AuthenticationListener *)as.magic();
+	listener->setData(mAm, &dynamic_cast<OdbcAuthStatus &>(as), ach);
 
-	as->as_allow = as->as_allow || auth_allow_check(mAm, as) == 0;
+	as.allow(as.allow() || auth_allow_check(mAm, as.getPtr()) == 0);
 
-	if (as->as_realm) {
+	if (as.realm()) {
 		/* Workaround for old linphone client that don't check whether algorithm is MD5 or SHA256.
 		 * They then answer for both, but the first one for SHA256 is of course wrong.
 		 * We workaround by selecting the second digest response.
@@ -152,45 +152,45 @@ void OdbcAuthModule::onCheck(auth_status_t *as, msg_auth_t *au, auth_challenger_
 			auth_response_t r;
 			memset(&r, 0, sizeof(r));
 			r.ar_size = sizeof(r);
-			auth_digest_response_get(as->as_home, &r, au->au_next->au_params);
+			auth_digest_response_get(as.home(), &r, au->au_next->au_params);
 
 			if (r.ar_algorithm == NULL || !strcasecmp(r.ar_algorithm, "MD5")) {
 				au = au->au_next;
 			}
 		}
 		/* After auth_digest_credentials, there is no more au->au_next. */
-		au = auth_digest_credentials(au, as->as_realm, mAm->am_opaque);
+		au = auth_digest_credentials(au, as.realm(), mAm->am_opaque);
 	} else
 		au = NULL;
 
-	if (as->as_allow) {
-		LOGD("%s: allow unauthenticated %s", __func__, as->as_method);
-		as->as_status = 0, as->as_phrase = NULL;
-		as->as_match = (msg_header_t *)au;
+	if (as.allow()) {
+		LOGD("%s: allow unauthenticated %s", __func__, as.method());
+		as.status(0), as.phrase(nullptr);
+		as.match(reinterpret_cast<msg_header_t *>(au));
 		return;
 	}
 
 	if (au) {
 		SLOGD << "Searching for auth digest response for this proxy";
-		msg_auth_t *matched_au = ModuleToolbox::findAuthorizationForRealm(as->as_home, au, as->as_realm);
+		msg_auth_t *matched_au = ModuleToolbox::findAuthorizationForRealm(as.home(), au, as.realm());
 		if (matched_au)
 			au = matched_au;
-		auth_digest_response_get(as->as_home, &listener->mAr, au->au_params);
+		auth_digest_response_get(as.home(), &listener->mAr, au->au_params);
 		SLOGD << "Using auth digest response for realm " << listener->mAr.ar_realm;
-		as->as_match = (msg_header_t *)au;
+		as.match(reinterpret_cast<msg_header_t *>(au));
 		flexisip_auth_check_digest(mAm, as, &listener->mAr, ach);
 	} else {
 		/* There was no realm or credentials, send challenge */
 		SLOGD << __func__ << ": no credentials matched realm or no realm";
-		auth_challenge_digest(mAm, as, ach);
-		listener->getModule()->mNonceStore.insert(as->as_response);
+		auth_challenge_digest(mAm, as.getPtr(), ach);
+		listener->getModule()->mNonceStore.insert(as.response());
 
 		// Retrieve the password in the hope it will be in cache when the remote UAC
 		// sends back its request; this time with the expected authentication credentials.
 		if (mImmediateRetrievePass) {
-			SLOGD << "Searching for " << as->as_user_uri->url_user
+			SLOGD << "Searching for " << as.userUri()->url_user
 			<< " password to have it when the authenticated request comes";
-			AuthDbBackend::get()->getPassword(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL);
+			AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, as.userUri()->url_user, nullptr);
 			//AuthDbBackend::get()->getPasswordForAlgo(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL, listener);
 		}
 		listener->finish();
@@ -198,25 +198,24 @@ void OdbcAuthModule::onCheck(auth_status_t *as, msg_auth_t *au, auth_challenger_
 	}
 }
 
-void OdbcAuthModule::onChallenge(auth_status_t *as, auth_challenger_t const *ach) {
-	auth_challenge_digest(mAm, as, ach);
+void OdbcAuthModule::onChallenge(AuthStatus &as, auth_challenger_t const *ach) {
+	auth_challenge_digest(mAm, as.getPtr(), ach);
 }
 
-void OdbcAuthModule::onCancel(auth_status_t *as) {
-	auth_cancel_default(mAm, as);
+void OdbcAuthModule::onCancel(AuthStatus &as) {
+	auth_cancel_default(mAm, as.getPtr());
 }
 
 #define PA "Authorization missing "
 
 /** Verify digest authentication */
-void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *as, auth_response_t *ar, auth_challenger_t const *ach) {
-	AuthenticationListener *listener = (AuthenticationListener *)as->as_magic;
+void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach) {
+	AuthenticationListener *listener = (AuthenticationListener *)as.magic();
 
-	if (am == NULL || as == NULL || ar == NULL || ach == NULL) {
-		if (as) {
-			as->as_status = 500, as->as_phrase = "Internal Server Error";
-			as->as_response = NULL;
-		}
+	if (am == NULL || ar == NULL || ach == NULL) {
+		as.status(500);
+		as.phrase("Internal Server Error");
+		as.response(nullptr);
 		listener->finish();
 		return;
 	}
@@ -234,36 +233,38 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *a
 
 		// assert(phrase);
 		LOGD("auth_method_digest: 400 %s", phrase);
-		as->as_status = 400, as->as_phrase = phrase;
-		as->as_response = NULL;
+		as.status(400);
+		as.phrase(phrase);
+		as.response(nullptr);
 		listener->finish();
 		return;
 	}
 
-	if (!ar->ar_username || !as->as_user_uri->url_user || !ar->ar_realm || !as->as_user_uri->url_host) {
-		as->as_status = 403, as->as_phrase = "Authentication info missing";
+	if (!ar->ar_username || !as.userUri()->url_user || !ar->ar_realm || !as.userUri()->url_host) {
+		as.status(403);
+		as.phrase("Authentication info missing");
 		SLOGUE << "Registration failure, authentication info are missing: usernames " <<
-		ar->ar_username << "/" << as->as_user_uri->url_user << ", hosts " << ar->ar_realm << "/" << as->as_user_uri->url_host;
+		ar->ar_username << "/" << as.userUri()->url_user << ", hosts " << ar->ar_realm << "/" << as.userUri()->url_host;
 		LOGD("from and authentication usernames [%s/%s] or from and authentication hosts [%s/%s] empty",
-				ar->ar_username, as->as_user_uri->url_user, ar->ar_realm, as->as_user_uri->url_host);
-		as->as_response = NULL;
+				ar->ar_username, as.userUri()->url_user, ar->ar_realm, as.userUri()->url_host);
+		as.response(nullptr);
 		listener->finish();
 		return;
 	}
 
 	Authentication *module = listener->getModule();
 	msg_time_t now = msg_now();
-	if (as->as_nonce_issued == 0 /* Already validated nonce */ && auth_validate_digest_nonce(am, as, ar, now) < 0) {
-		as->as_blacklist = am->am_blacklist;
-		auth_challenge_digest(am, as, ach);
-		module->mNonceStore.insert(as->as_response);
+	if (as.nonceIssued() == 0 /* Already validated nonce */ && auth_validate_digest_nonce(am, as.getPtr(), ar, now) < 0) {
+		as.blacklist(am->am_blacklist);
+		auth_challenge_digest(am, as.getPtr(), ach);
+		module->mNonceStore.insert(as.response());
 		listener->finish();
 		return;
 	}
 
-	if (as->as_stale) {
-		auth_challenge_digest(am, as, ach);
-		module->mNonceStore.insert(as->as_response);
+	if (as.stale()) {
+		auth_challenge_digest(am, as.getPtr(), ach);
+		module->mNonceStore.insert(as.response());
 		listener->finish();
 		return;
 	}
@@ -273,9 +274,9 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *a
 		int nnc = (int)strtoul(ar->ar_nc, NULL, 16);
 		if (pnc == -1 || pnc >= nnc) {
 			LOGE("Bad nonce count %d -> %d for %s", pnc, nnc, ar->ar_nonce);
-			as->as_blacklist = am->am_blacklist;
-			auth_challenge_digest(am, as, ach);
-			module->mNonceStore.insert(as->as_response);
+			as.blacklist(am->am_blacklist);
+			auth_challenge_digest(am, as.getPtr(), ach);
+			module->mNonceStore.insert(as.response());
 			listener->finish();
 			return;
 		} else {
@@ -283,7 +284,7 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *a
 		}
 	}
 
-	AuthDbBackend::get()->getPassword(as->as_user_uri->url_user, as->as_user_uri->url_host, ar->ar_username, listener);
+	AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, ar->ar_username, listener);
 }
 
 // ====================================================================================================================
@@ -297,7 +298,7 @@ AuthenticationListener::AuthenticationListener(Authentication *module, shared_pt
 	mAr.ar_size = sizeof(mAr);
 }
 
-void AuthenticationListener::setData(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach) {
+void AuthenticationListener::setData(auth_mod_t *am, OdbcAuthStatus *as, auth_challenger_t const *ach) {
 	mAm = am;
 	mAs = as;
 	mAch = ach;
@@ -392,19 +393,18 @@ void AuthenticationListener::onResult(AuthDbResult result, const string &passwd)
 }
 
 void AuthenticationListener::finishForAlgorithm () {
-	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
-	if ((extraData->mAlgoUsed.size() > 1) && (mAs->as_status == 401)) {
-		msg_header_t* response;
-		response = msg_header_copy(mAs->as_home, mAs->as_response);
+// 	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
+	if ((mAs->usedAlgo().size() > 1) && (mAs->status() == 401)) {
+		msg_header_t* response = msg_header_copy(mAs->home(), mAs->response());
 		msg_header_remove_param((msg_common_t *)response, "algorithm=MD5");
-		msg_header_replace_item(mAs->as_home, (msg_common_t *)response, "algorithm=SHA-256");
-		mEv->reply(mAs->as_status, mAs->as_phrase, SIPTAG_HEADER((const sip_header_t *)mAs->as_info),
+		msg_header_replace_item(mAs->home(), (msg_common_t *)response, "algorithm=SHA-256");
+		mEv->reply(mAs->status(), mAs->phrase(), SIPTAG_HEADER((const sip_header_t *)mAs->info()),
 				   SIPTAG_HEADER((const sip_header_t *)response),
-				   SIPTAG_HEADER((const sip_header_t *)mAs->as_response),
+				   SIPTAG_HEADER((const sip_header_t *)mAs->response()),
 				   SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
 	} else {
-		mEv->reply(mAs->as_status, mAs->as_phrase, SIPTAG_HEADER((const sip_header_t *)mAs->as_info),
-				   SIPTAG_HEADER((const sip_header_t *)mAs->as_response),
+		mEv->reply(mAs->status(), mAs->phrase(), SIPTAG_HEADER((const sip_header_t *)mAs->info()),
+				   SIPTAG_HEADER((const sip_header_t *)mAs->response()),
 				   SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
 	}
 }
@@ -415,10 +415,10 @@ void AuthenticationListener::finishForAlgorithm () {
 void AuthenticationListener::finish() {
 	const shared_ptr<MsgSip> &ms = mEv->getMsgSip();
 	const sip_t *sip = ms->getSip();
-	if (mAs->as_status) {
-		if (mAs->as_status != 401 && mAs->as_status != 407) {
+	if (mAs->status()) {
+		if (mAs->status() != 401 && mAs->status() != 407) {
 			auto log = make_shared<AuthLog>(sip, mPasswordFound);
-			log->setStatusCode(mAs->as_status, mAs->as_phrase);
+			log->setStatusCode(mAs->status(), mAs->phrase());
 			log->setCompleted();
 			mEv->setEventLog(log);
 		}
@@ -427,11 +427,11 @@ void AuthenticationListener::finish() {
 		// Success
 		if (sip->sip_request->rq_method == sip_method_register) {
 			msg_auth_t *au =
-			ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_authorization, mAs->as_realm);
+			ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_authorization, mAs->realm());
 			if (au)
 				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
 		} else {
-			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_proxy_authorization, mAs->as_realm);
+			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_proxy_authorization, mAs->realm());
 			if(au->au_next)
 				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au->au_next);
 			if (au)
@@ -449,8 +449,7 @@ void AuthenticationListener::finish() {
 }
 
 void AuthenticationListener::finishVerifyAlgos(const vector<passwd_algo_t> &pass) {
-	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
-	extraData->mAlgoUsed.remove_if([&pass](string algo) {
+	mAs->usedAlgo().remove_if([&pass](string algo) {
 		bool found = false;
 
 		for (const auto &password : pass) {
@@ -490,7 +489,7 @@ int AuthenticationListener::checkPasswordMd5(const char *passwd){
 	if (mAr.ar_md5sess)
 		auth_digest_a1sess(&mAr, a1buf, a1), a1 = a1buf;
 
-	auth_digest_response(&mAr, response, a1, mAs->as_method, mAs->as_body, mAs->as_bodylen);
+	auth_digest_response(&mAr, response, a1, mAs->method(), mAs->body(), mAs->bodyLen());
 	return !passwd || strcmp(response, mAr.ar_response);
 }
 
@@ -514,7 +513,7 @@ int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
 		if (mAr.ar_md5sess)
 			a1 = auth_digest_a1sess_for_algorithm(&mAr, a1);
 
-		string response = auth_digest_response_for_algorithm(&mAr, mAs->as_method, mAs->as_body, mAs->as_bodylen, a1);
+		string response = auth_digest_response_for_algorithm(&mAr, mAs->method(), mAs->body(), mAs->bodyLen(), a1);
 		return (passwd && response == mAr.ar_response ? 0 : -1);
 	}
 	return -1;
@@ -524,16 +523,16 @@ int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
  * NULL if passwd not found.
  */
 void AuthenticationListener::checkPassword(const char *passwd) {
-	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
 	if (checkPasswordForAlgorithm(passwd)) {
-		if (mAm->am_forbidden && !extraData->mNo403) {
-			mAs->as_status = 403, mAs->as_phrase = "Forbidden";
-			mAs->as_response = NULL;
-			mAs->as_blacklist = mAm->am_blacklist;
+		if (mAm->am_forbidden && !mAs->no403()) {
+			mAs->status(403);
+			mAs->phrase("Forbidden");
+			mAs->response(nullptr);
+			mAs->blacklist(mAm->am_blacklist);
 		} else {
-			auth_challenge_digest(mAm, mAs, mAch);
-			getModule()->mNonceStore.insert(mAs->as_response);
-			mAs->as_blacklist = mAm->am_blacklist;
+			auth_challenge_digest(mAm, mAs->getPtr(), mAch);
+			getModule()->mNonceStore.insert(mAs->response());
+			mAs->blacklist(mAm->am_blacklist);
 		}
 		if (passwd) {
 			SLOGUE << "Registration failure, password did not match";
@@ -547,19 +546,19 @@ void AuthenticationListener::checkPassword(const char *passwd) {
 	}
 
 	// assert(apw);
-	mAs->as_user = mAr.ar_username;
-	mAs->as_anonymous = false;
+	mAs->user(mAr.ar_username);
+	mAs->anonymous(false);
 
 	if (mAm->am_nextnonce || mAm->am_mutual)
-		auth_info_digest(mAm, mAs, mAch);
+		auth_info_digest(mAm, mAs->getPtr(), mAch);
 
 	if (mAm->am_challenge)
-		auth_challenge_digest(mAm, mAs, mAch);
+		auth_challenge_digest(mAm, mAs->getPtr(), mAch);
 
 	LOGD("auth_method_digest: successful authentication");
 
-	mAs->as_status = 0; /* Successful authentication! */
-	mAs->as_phrase = "";
+	mAs->status(0); /* Successful authentication! */
+	mAs->phrase("");
 }
 
 void AuthenticationListener::processResponse() {
@@ -579,9 +578,10 @@ void AuthenticationListener::processResponse() {
 }
 
 void AuthenticationListener::onError() {
-	if (!mAs->as_status) {
-		mAs->as_status = 500, mAs->as_phrase = "Internal error";
-		mAs->as_response = NULL;
+	if (mAs->status() != 0) {
+		mAs->status(500);
+		mAs->phrase("Internal error");
+		mAs->response(nullptr);
 	}
 	finish();
 }
@@ -1058,31 +1058,28 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 	// with retransmissions.
 	ev->createIncomingTransaction();
 
-	auth_status_t *as;
-	as = auth_status_new(ms->getHome());
-	as->as_method = sip->sip_request->rq_method_name;
-	as->as_source = msg_addrinfo(ms->getMsg());
-	as->as_user_uri = ppi ? ppi->ppid_url : sip->sip_from->a_url;
-	as->as_realm = as->as_user_uri->url_host;
-	as->as_display = sip->sip_from->a_display;
-	if (sip->sip_payload)
-		as->as_body = sip->sip_payload->pl_data, as->as_bodylen = sip->sip_payload->pl_len;
-
-	auto *data = new OdbcAuthModule::ExtraData();
-	data->mNo403 = mNo403Expr->eval(ev->getSip());
-	data->mAlgoUsed = mAlgorithms;
-	as->as_plugin = reinterpret_cast<auth_splugin_t *>(data);
-
-	as->as_magic = new AuthenticationListener(this, ev);
+	auto *as = new OdbcAuthStatus();
+	as->method(sip->sip_request->rq_method_name);
+	as->source(msg_addrinfo(ms->getMsg()));
+	as->userUri(ppi ? ppi->ppid_url : sip->sip_from->a_url);
+	as->realm(as->userUri()->url_host);
+	as->display(sip->sip_from->a_display);
+	if (sip->sip_payload) {
+		as->body(sip->sip_payload->pl_data);
+		as->bodyLen(sip->sip_payload->pl_len);
+	}
+	as->no403(mNo403Expr->eval(ev->getSip()));
+	as->usedAlgo() = mAlgorithms;
+	as->magic(new AuthenticationListener(this, ev));
 
 	// Attention: the auth_mod_verify method should not send by itself any message but
 	// return after having set the as status and phrase.
 	// Another point in asynchronous mode is that the asynchronous callbacks MUST be called
 	// AFTER the nta_msg_treply bellow. Otherwise the as would be already destroyed.
 	if (sip->sip_request->rq_method == sip_method_register) {
-		am->verify(as, sip->sip_authorization, &mRegistrarChallenger);
+		am->verify(*as, sip->sip_authorization, &mRegistrarChallenger);
 	} else {
-		am->verify(as, sip->sip_proxy_authorization, &mProxyChallenger);
+		am->verify(*as, sip->sip_proxy_authorization, &mProxyChallenger);
 	}
 	if (mCurrentAuthOp) {
 		/*it has not been cleared by the listener itself, so password checking is still in progress. We need to
@@ -1104,16 +1101,16 @@ void Authentication::onResponse(shared_ptr<ResponseSipEvent> &ev) {
 
 	sip_t *sip = ev->getMsgSip()->getSip();
 	if (sip->sip_status->st_status == 407 && sip->sip_proxy_authenticate) {
-		auth_status_t *as = auth_status_new(ev->getMsgSip()->getHome());
-		as->as_realm = proxyRealm.get()->c_str();
-		as->as_user_uri = sip->sip_from->a_url;
-		OdbcAuthModule *am = findAuthModule(as->as_realm);
+		auto *as = new OdbcAuthStatus();
+		as->realm(proxyRealm.get()->c_str());
+		as->userUri(sip->sip_from->a_url);
+		OdbcAuthModule *am = findAuthModule(as->realm());
 		if (am) {
-			am->challenge(as, &mProxyChallenger);
-			mNonceStore.insert(as->as_response);
-			msg_header_insert(ev->getMsgSip()->getMsg(), (msg_pub_t *)sip, (msg_header_t *)as->as_response);
+			am->challenge(*as, &mProxyChallenger);
+			mNonceStore.insert(as->response());
+			msg_header_insert(ev->getMsgSip()->getMsg(), (msg_pub_t *)sip, (msg_header_t *)as->response());
 		} else {
-			LOGD("Authentication module for %s not found", as->as_realm);
+			LOGD("Authentication module for %s not found", as->realm());
 		}
 	} else {
 		LOGD("not handled newauthon401");

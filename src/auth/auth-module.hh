@@ -20,20 +20,22 @@
 
 #include <sofia-sip/auth_module.h>
 
-class AuthModuleWrapper {
-public:
-	AuthModuleWrapper(su_root_t *root, tag_type_t, tag_value_t, ...);
-	virtual ~AuthModuleWrapper() {auth_mod_destroy(mAm);}
+#include "auth-status.hh"
 
-	void verify(auth_status_t *as, msg_auth_t *credentials, auth_challenger_t const *ach) {auth_mod_verify(mAm, as, credentials, ach);}
-	void challenge(auth_status_t *as, auth_challenger_t const *ach) {auth_mod_challenge(mAm, as, ach);}
-	void authorize(auth_status_t *as, auth_challenger_t const *ach) {auth_mod_challenge(mAm, as, ach);}
-	void cancel(auth_status_t *as) {auth_mod_cancel(mAm, as);}
+class AuthModule {
+public:
+	AuthModule(su_root_t *root, tag_type_t, tag_value_t, ...);
+	virtual ~AuthModule() {auth_mod_destroy(mAm);}
+
+	void verify(AuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) {auth_mod_verify(mAm, as.getPtr(), credentials, ach);}
+	void challenge(AuthStatus &as, auth_challenger_t const *ach) {auth_mod_challenge(mAm, as.getPtr(), ach);}
+	void authorize(AuthStatus &as, auth_challenger_t const *ach) {auth_mod_challenge(mAm, as.getPtr(), ach);}
+	void cancel(AuthStatus &as) {auth_mod_cancel(mAm, as.getPtr());}
 
 protected:
-	virtual void onCheck(auth_status_t *as, msg_auth_t *credentials, auth_challenger_t const *ach) = 0;
-	virtual void onChallenge(auth_status_t *as, auth_challenger_t const *ach) = 0;
-	virtual void onCancel(auth_status_t *as) = 0;
+	virtual void onCheck(AuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) = 0;
+	virtual void onChallenge(AuthStatus &as, auth_challenger_t const *ach) = 0;
+	virtual void onCancel(AuthStatus &as) = 0;
 
 	auth_mod_t *mAm = nullptr;
 

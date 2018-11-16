@@ -54,23 +54,30 @@ private:
 	int mNonceExpires = 3600;
 };
 
-class OdbcAuthModule : public AuthModuleWrapper {
+class OdbcAuthStatus : public AuthStatus {
 public:
-	struct ExtraData {
-		bool mNo403 = false;
-		std::list<std::string> mAlgoUsed;
-	};
+	bool no403() const {return mNo403;}
+	void no403(bool no403) {mNo403 = no403;}
 
+	std::list<std::string> &usedAlgo() {return mAlgoUsed;}
+
+private:
+	bool mNo403 = false;
+	std::list<std::string> mAlgoUsed;
+};
+
+class OdbcAuthModule : public AuthModule {
+public:
 	OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo);
 	OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo, int nonceExpire);
 	~OdbcAuthModule() override = default;
 
 private:
-	void onCheck(auth_status_t *as, msg_auth_t *credentials, auth_challenger_t const *ach) override;
-	void onChallenge(auth_status_t *as, auth_challenger_t const *ach) override;
-	void onCancel(auth_status_t *as) override;
+	void onCheck(AuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) override;
+	void onChallenge(AuthStatus &as, auth_challenger_t const *ach) override;
+	void onCancel(AuthStatus &as) override;
 
-	void flexisip_auth_check_digest(auth_mod_t *am, auth_status_t *as, auth_response_t *ar, auth_challenger_t const *ach);
+	void flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach);
 
 	bool mDisableQOPAuth = false;
 	bool mImmediateRetrievePass = true;
@@ -85,7 +92,7 @@ public:
 	AuthenticationListener(Authentication *, std::shared_ptr<RequestSipEvent>);
 	~AuthenticationListener() override = default;
 
-	void setData(auth_mod_t *am, auth_status_t *as, auth_challenger_t const *ach);
+	void setData(auth_mod_t *am, OdbcAuthStatus *as, auth_challenger_t const *ach);
 	void checkPassword(const char *password);
 	int checkPasswordMd5(const char *password);
 	int checkPasswordForAlgorithm(const char *password);
@@ -114,7 +121,7 @@ private:
 	Authentication *mModule = nullptr;
 	std::shared_ptr<RequestSipEvent> mEv;
 	auth_mod_t *mAm = nullptr;
-	auth_status_t *mAs = nullptr;
+	OdbcAuthStatus *mAs = nullptr;
 	const auth_challenger_t *mAch = nullptr;
 	bool mPasswordFound = false;
 	AuthDbResult mResult;
