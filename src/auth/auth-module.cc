@@ -24,7 +24,7 @@
 
 #include "log/logmanager.hh"
 
-#include "auth-module-wrapper.hh"
+#include "auth-module.hh"
 
 using namespace std;
 

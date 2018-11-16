@@ -27,7 +27,7 @@
 
 #include <sofia-sip/msg_types.h>
 
-#include "auth/auth-module-wrapper.hh"
+#include "auth/auth-module.hh"
 #include "authdb.hh"
 #include "module.hh"
 
