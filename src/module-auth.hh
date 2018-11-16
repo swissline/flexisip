@@ -86,7 +86,7 @@ private:
 	void onChallenge(AuthStatus &as, auth_challenger_t const *ach) override;
 	void onCancel(AuthStatus &as) override;
 
-	void flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach);
+	void flexisip_auth_check_digest(AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach);
 
 	NonceStore mNonceStore;
 	bool mDisableQOPAuth = false;

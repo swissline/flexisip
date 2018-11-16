@@ -180,7 +180,7 @@ void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t c
 		auth_digest_response_get(as.home(), &listener.mAr, au->au_params);
 		SLOGD << "Using auth digest response for realm " << listener.mAr.ar_realm;
 		as.match(reinterpret_cast<msg_header_t *>(au));
-		flexisip_auth_check_digest(mAm, as, &listener.mAr, ach);
+		flexisip_auth_check_digest(as, &listener.mAr, ach);
 	} else {
 		/* There was no realm or credentials, send challenge */
 		SLOGD << __func__ << ": no credentials matched realm or no realm";
@@ -211,10 +211,10 @@ void OdbcAuthModule::onCancel(AuthStatus &as) {
 #define PA "Authorization missing "
 
 /** Verify digest authentication */
-void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach) {
+void OdbcAuthModule::flexisip_auth_check_digest(AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach) {
 	AuthenticationListener &listener = dynamic_cast<OdbcAuthStatus &>(as).listener();
 
-	if (am == NULL || ar == NULL || ach == NULL) {
+	if (ar == NULL || ach == NULL) {
 		as.status(500);
 		as.phrase("Internal Server Error");
 		as.response(nullptr);
@@ -255,16 +255,16 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, 
 	}
 
 	msg_time_t now = msg_now();
-	if (as.nonceIssued() == 0 /* Already validated nonce */ && auth_validate_digest_nonce(am, as.getPtr(), ar, now) < 0) {
-		as.blacklist(am->am_blacklist);
-		auth_challenge_digest(am, as.getPtr(), ach);
+	if (as.nonceIssued() == 0 /* Already validated nonce */ && auth_validate_digest_nonce(mAm, as.getPtr(), ar, now) < 0) {
+		as.blacklist(mAm->am_blacklist);
+		auth_challenge_digest(mAm, as.getPtr(), ach);
 		mNonceStore.insert(as.response());
 		listener.finish();
 		return;
 	}
 
 	if (as.stale()) {
-		auth_challenge_digest(am, as.getPtr(), ach);
+		auth_challenge_digest(mAm, as.getPtr(), ach);
 		mNonceStore.insert(as.response());
 		listener.finish();
 		return;
@@ -275,8 +275,8 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, 
 		int nnc = (int)strtoul(ar->ar_nc, NULL, 16);
 		if (pnc == -1 || pnc >= nnc) {
 			LOGE("Bad nonce count %d -> %d for %s", pnc, nnc, ar->ar_nonce);
-			as.blacklist(am->am_blacklist);
-			auth_challenge_digest(am, as.getPtr(), ach);
+			as.blacklist(mAm->am_blacklist);
+			auth_challenge_digest(mAm, as.getPtr(), ach);
 			mNonceStore.insert(as.response());
 			listener.finish();
 			return;
