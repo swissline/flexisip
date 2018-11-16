@@ -135,12 +135,13 @@ OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const
 		AUTHTAG_NEXT_EXPIRES(nonceExpire),
 		TAG_END()
 	) {
+	mNonceStore.setNonceExpires(nonceExpire);
 }
 
 void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t const *ach) {
 	auto &authStatus = dynamic_cast<OdbcAuthStatus &>(as);
 	AuthenticationListener &listener = authStatus.listener();
-	listener.setData(mAm, &authStatus, ach);
+	listener.setData(*this, authStatus, ach);
 
 	as.allow(as.allow() || auth_allow_check(mAm, as.getPtr()) == 0);
 
@@ -184,7 +185,7 @@ void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t c
 		/* There was no realm or credentials, send challenge */
 		SLOGD << __func__ << ": no credentials matched realm or no realm";
 		auth_challenge_digest(mAm, as.getPtr(), ach);
-		listener.getModule()->mNonceStore.insert(as.response());
+		mNonceStore.insert(as.response());
 
 		// Retrieve the password in the hope it will be in cache when the remote UAC
 		// sends back its request; this time with the expected authentication credentials.
@@ -253,35 +254,34 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, 
 		return;
 	}
 
-	Authentication *module = listener.getModule();
 	msg_time_t now = msg_now();
 	if (as.nonceIssued() == 0 /* Already validated nonce */ && auth_validate_digest_nonce(am, as.getPtr(), ar, now) < 0) {
 		as.blacklist(am->am_blacklist);
 		auth_challenge_digest(am, as.getPtr(), ach);
-		module->mNonceStore.insert(as.response());
+		mNonceStore.insert(as.response());
 		listener.finish();
 		return;
 	}
 
 	if (as.stale()) {
 		auth_challenge_digest(am, as.getPtr(), ach);
-		module->mNonceStore.insert(as.response());
+		mNonceStore.insert(as.response());
 		listener.finish();
 		return;
 	}
 
 	if (!mDisableQOPAuth) {
-		int pnc = module->mNonceStore.getNc(ar->ar_nonce);
+		int pnc = mNonceStore.getNc(ar->ar_nonce);
 		int nnc = (int)strtoul(ar->ar_nc, NULL, 16);
 		if (pnc == -1 || pnc >= nnc) {
 			LOGE("Bad nonce count %d -> %d for %s", pnc, nnc, ar->ar_nonce);
 			as.blacklist(am->am_blacklist);
 			auth_challenge_digest(am, as.getPtr(), ach);
-			module->mNonceStore.insert(as.response());
+			mNonceStore.insert(as.response());
 			listener.finish();
 			return;
 		} else {
-			module->mNonceStore.updateNc(ar->ar_nonce, nnc);
+			mNonceStore.updateNc(ar->ar_nonce, nnc);
 		}
 	}
 
@@ -299,9 +299,9 @@ AuthenticationListener::AuthenticationListener(Authentication *module, shared_pt
 	mAr.ar_size = sizeof(mAr);
 }
 
-void AuthenticationListener::setData(auth_mod_t *am, OdbcAuthStatus *as, auth_challenger_t const *ach) {
-	mAm = am;
-	mAs = as;
+void AuthenticationListener::setData(OdbcAuthModule &am, OdbcAuthStatus &as, auth_challenger_t const *ach) {
+	mAm = &am;
+	mAs = &as;
 	mAch = ach;
 }
 
@@ -524,15 +524,15 @@ int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
  */
 void AuthenticationListener::checkPassword(const char *passwd) {
 	if (checkPasswordForAlgorithm(passwd)) {
-		if (mAm->am_forbidden && !mAs->no403()) {
+		if (mAm->getPtr()->am_forbidden && !mAs->no403()) {
 			mAs->status(403);
 			mAs->phrase("Forbidden");
 			mAs->response(nullptr);
-			mAs->blacklist(mAm->am_blacklist);
+			mAs->blacklist(mAm->getPtr()->am_blacklist);
 		} else {
-			auth_challenge_digest(mAm, mAs->getPtr(), mAch);
-			getModule()->mNonceStore.insert(mAs->response());
-			mAs->blacklist(mAm->am_blacklist);
+			auth_challenge_digest(mAm->getPtr(), mAs->getPtr(), mAch);
+			mAm->nonceStore().insert(mAs->response());
+			mAs->blacklist(mAm->getPtr()->am_blacklist);
 		}
 		if (passwd) {
 			SLOGUE << "Registration failure, password did not match";
@@ -549,11 +549,11 @@ void AuthenticationListener::checkPassword(const char *passwd) {
 	mAs->user(mAr.ar_username);
 	mAs->anonymous(false);
 
-	if (mAm->am_nextnonce || mAm->am_mutual)
-		auth_info_digest(mAm, mAs->getPtr(), mAch);
+	if (mAm->getPtr()->am_nextnonce || mAm->getPtr()->am_mutual)
+		auth_info_digest(mAm->getPtr(), mAs->getPtr(), mAch);
 
-	if (mAm->am_challenge)
-		auth_challenge_digest(mAm, mAs->getPtr(), mAch);
+	if (mAm->getPtr()->am_challenge)
+		auth_challenge_digest(mAm->getPtr(), mAs->getPtr(), mAch);
 
 	LOGD("auth_method_digest: successful authentication");
 
@@ -800,7 +800,6 @@ void Authentication::onLoad(const GenericStruct *mc) {
 	mTestAccountsEnabled = mc->get<ConfigBoolean>("enable-test-accounts-creation")->read();
 	mDisableQOPAuth = mc->get<ConfigBoolean>("disable-qop-auth")->read();
 	int nonceExpires = mc->get<ConfigInt>("nonce-expires")->read();
-	mNonceStore.setNonceExpires(nonceExpires);
 	mAlgorithms = mc->get<ConfigStringList>("available-algorithms")->read();
 	mAlgorithms.unique();
 
@@ -1107,13 +1106,19 @@ void Authentication::onResponse(shared_ptr<ResponseSipEvent> &ev) {
 		OdbcAuthModule *am = findAuthModule(as->realm());
 		if (am) {
 			am->challenge(*as, &mProxyChallenger);
-			mNonceStore.insert(as->response());
+			am->nonceStore().insert(as->response());
 			msg_header_insert(ev->getMsgSip()->getMsg(), (msg_pub_t *)sip, (msg_header_t *)as->response());
 		} else {
 			LOGD("Authentication module for %s not found", as->realm());
 		}
 	} else {
 		LOGD("not handled newauthon401");
+	}
+}
+
+void Authentication::onIdle() {
+	for (auto &it : mAuthModules) {
+		it.second->nonceStore().cleanExpired();
 	}
 }
 

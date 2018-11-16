@@ -79,6 +79,8 @@ public:
 	OdbcAuthModule(su_root_t *root, const std::string &domain, const std::string &algo, int nonceExpire);
 	~OdbcAuthModule() override = default;
 
+	NonceStore &nonceStore() {return mNonceStore;}
+
 private:
 	void onCheck(AuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) override;
 	void onChallenge(AuthStatus &as, auth_challenger_t const *ach) override;
@@ -86,6 +88,7 @@ private:
 
 	void flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach);
 
+	NonceStore mNonceStore;
 	bool mDisableQOPAuth = false;
 	bool mImmediateRetrievePass = true;
 };
@@ -99,7 +102,7 @@ public:
 	AuthenticationListener(Authentication *, std::shared_ptr<RequestSipEvent>);
 	~AuthenticationListener() override = default;
 
-	void setData(auth_mod_t *am, OdbcAuthStatus *as, auth_challenger_t const *ach);
+	void setData(OdbcAuthModule &am, OdbcAuthStatus &as, auth_challenger_t const *ach);
 	void checkPassword(const char *password);
 	int checkPasswordMd5(const char *password);
 	int checkPasswordForAlgorithm(const char *password);
@@ -127,7 +130,7 @@ private:
 	friend class Authentication;
 	Authentication *mModule = nullptr;
 	std::shared_ptr<RequestSipEvent> mEv;
-	auth_mod_t *mAm = nullptr;
+	OdbcAuthModule *mAm = nullptr;
 	OdbcAuthStatus *mAs = nullptr;
 	const auth_challenger_t *mAch = nullptr;
 	bool mPasswordFound = false;
@@ -141,7 +144,6 @@ public:
 	StatCounter64 *mCountSyncRetrieve = nullptr;
 	StatCounter64 *mCountPassFound = nullptr;
 	StatCounter64 *mCountPassNotFound = nullptr;
-	NonceStore mNonceStore;
 
 	Authentication(Agent *ag);
 	~Authentication() override;
@@ -156,7 +158,7 @@ public:
 	bool handleTlsClientAuthentication(std::shared_ptr<RequestSipEvent> &ev);
 	void onRequest(std::shared_ptr<RequestSipEvent> &ev) override;
 	void onResponse(std::shared_ptr<ResponseSipEvent> &ev) override;
-	void onIdle() override {mNonceStore.cleanExpired();}
+	void onIdle() override;
 	bool doOnConfigStateChanged(const ConfigValue &conf, ConfigState state) override;
 
 private:

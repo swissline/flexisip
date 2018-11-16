@@ -27,6 +27,8 @@ public:
 	AuthModule(su_root_t *root, tag_type_t, tag_value_t, ...);
 	virtual ~AuthModule() {auth_mod_destroy(mAm);}
 
+	auth_mod_t *getPtr() const {return mAm;}
+
 	void verify(AuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) {auth_mod_verify(mAm, as.getPtr(), credentials, ach);}
 	void challenge(AuthStatus &as, auth_challenger_t const *ach) {auth_mod_challenge(mAm, as.getPtr(), ach);}
 	void authorize(AuthStatus &as, auth_challenger_t const *ach) {auth_mod_challenge(mAm, as.getPtr(), ach);}
