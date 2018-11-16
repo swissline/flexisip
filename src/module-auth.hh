@@ -54,6 +54,8 @@ private:
 	int mNonceExpires = 3600;
 };
 
+class AuthenticationListener;
+
 class OdbcAuthStatus : public AuthStatus {
 public:
 	bool no403() const {return mNo403;}
@@ -61,9 +63,14 @@ public:
 
 	std::list<std::string> &usedAlgo() {return mAlgoUsed;}
 
+	AuthenticationListener &listener() {return *mListener;}
+	void listener(AuthenticationListener &l) {mListener = &l;}
+	void listener(AuthenticationListener *l) {mListener = l;}
+
 private:
 	bool mNo403 = false;
 	std::list<std::string> mAlgoUsed;
+	AuthenticationListener *mListener;
 };
 
 class OdbcAuthModule : public AuthModule {

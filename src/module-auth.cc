@@ -138,8 +138,9 @@ OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const
 }
 
 void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t const *ach) {
-	AuthenticationListener *listener = (AuthenticationListener *)as.magic();
-	listener->setData(mAm, &dynamic_cast<OdbcAuthStatus &>(as), ach);
+	auto &authStatus = dynamic_cast<OdbcAuthStatus &>(as);
+	AuthenticationListener &listener = authStatus.listener();
+	listener.setData(mAm, &authStatus, ach);
 
 	as.allow(as.allow() || auth_allow_check(mAm, as.getPtr()) == 0);
 
@@ -175,15 +176,15 @@ void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t c
 		msg_auth_t *matched_au = ModuleToolbox::findAuthorizationForRealm(as.home(), au, as.realm());
 		if (matched_au)
 			au = matched_au;
-		auth_digest_response_get(as.home(), &listener->mAr, au->au_params);
-		SLOGD << "Using auth digest response for realm " << listener->mAr.ar_realm;
+		auth_digest_response_get(as.home(), &listener.mAr, au->au_params);
+		SLOGD << "Using auth digest response for realm " << listener.mAr.ar_realm;
 		as.match(reinterpret_cast<msg_header_t *>(au));
-		flexisip_auth_check_digest(mAm, as, &listener->mAr, ach);
+		flexisip_auth_check_digest(mAm, as, &listener.mAr, ach);
 	} else {
 		/* There was no realm or credentials, send challenge */
 		SLOGD << __func__ << ": no credentials matched realm or no realm";
 		auth_challenge_digest(mAm, as.getPtr(), ach);
-		listener->getModule()->mNonceStore.insert(as.response());
+		listener.getModule()->mNonceStore.insert(as.response());
 
 		// Retrieve the password in the hope it will be in cache when the remote UAC
 		// sends back its request; this time with the expected authentication credentials.
@@ -193,7 +194,7 @@ void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t c
 			AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, as.userUri()->url_user, nullptr);
 			//AuthDbBackend::get()->getPasswordForAlgo(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL, listener);
 		}
-		listener->finish();
+		listener.finish();
 		return;
 	}
 }
@@ -210,13 +211,13 @@ void OdbcAuthModule::onCancel(AuthStatus &as) {
 
 /** Verify digest authentication */
 void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach) {
-	AuthenticationListener *listener = (AuthenticationListener *)as.magic();
+	AuthenticationListener &listener = dynamic_cast<OdbcAuthStatus &>(as).listener();
 
 	if (am == NULL || ar == NULL || ach == NULL) {
 		as.status(500);
 		as.phrase("Internal Server Error");
 		as.response(nullptr);
-		listener->finish();
+		listener.finish();
 		return;
 	}
 
@@ -236,7 +237,7 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, 
 		as.status(400);
 		as.phrase(phrase);
 		as.response(nullptr);
-		listener->finish();
+		listener.finish();
 		return;
 	}
 
@@ -248,24 +249,24 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, 
 		LOGD("from and authentication usernames [%s/%s] or from and authentication hosts [%s/%s] empty",
 				ar->ar_username, as.userUri()->url_user, ar->ar_realm, as.userUri()->url_host);
 		as.response(nullptr);
-		listener->finish();
+		listener.finish();
 		return;
 	}
 
-	Authentication *module = listener->getModule();
+	Authentication *module = listener.getModule();
 	msg_time_t now = msg_now();
 	if (as.nonceIssued() == 0 /* Already validated nonce */ && auth_validate_digest_nonce(am, as.getPtr(), ar, now) < 0) {
 		as.blacklist(am->am_blacklist);
 		auth_challenge_digest(am, as.getPtr(), ach);
 		module->mNonceStore.insert(as.response());
-		listener->finish();
+		listener.finish();
 		return;
 	}
 
 	if (as.stale()) {
 		auth_challenge_digest(am, as.getPtr(), ach);
 		module->mNonceStore.insert(as.response());
-		listener->finish();
+		listener.finish();
 		return;
 	}
 
@@ -277,14 +278,14 @@ void OdbcAuthModule::flexisip_auth_check_digest(auth_mod_t *am, AuthStatus &as, 
 			as.blacklist(am->am_blacklist);
 			auth_challenge_digest(am, as.getPtr(), ach);
 			module->mNonceStore.insert(as.response());
-			listener->finish();
+			listener.finish();
 			return;
 		} else {
 			module->mNonceStore.updateNc(ar->ar_nonce, nnc);
 		}
 	}
 
-	AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, ar->ar_username, listener);
+	AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, ar->ar_username, &listener);
 }
 
 // ====================================================================================================================
@@ -393,7 +394,6 @@ void AuthenticationListener::onResult(AuthDbResult result, const string &passwd)
 }
 
 void AuthenticationListener::finishForAlgorithm () {
-// 	auto *extraData = reinterpret_cast<OdbcAuthModule::ExtraData *>(mAs->as_plugin);
 	if ((mAs->usedAlgo().size() > 1) && (mAs->status() == 401)) {
 		msg_header_t* response = msg_header_copy(mAs->home(), mAs->response());
 		msg_header_remove_param((msg_common_t *)response, "algorithm=MD5");
@@ -1070,7 +1070,7 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 	}
 	as->no403(mNo403Expr->eval(ev->getSip()));
 	as->usedAlgo() = mAlgorithms;
-	as->magic(new AuthenticationListener(this, ev));
+	as->listener(new AuthenticationListener(this, ev));
 
 	// Attention: the auth_mod_verify method should not send by itself any message but
 	// return after having set the as status and phrase.
