@@ -37,7 +37,7 @@ struct auth_mod_plugin_t {
 	auth_plugin_t plugin[1];
 };
 
-AuthModule::AuthModule(su_root_t *root, tag_type_t tag, tag_value_t value, ...) {
+AuthModule::AuthModule(su_root_t *root, tag_type_t tag, tag_value_t value, ...) : mRoot(root) {
 	ta_list ta;
 
 	registerScheme();

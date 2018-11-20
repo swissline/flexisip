@@ -28,6 +28,7 @@ public:
 	virtual ~AuthModule() {auth_mod_destroy(mAm);}
 
 	auth_mod_t *getPtr() const {return mAm;}
+	su_root_t *getRoot() const {return mRoot;}
 
 	void verify(AuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) {auth_mod_verify(mAm, as.getPtr(), credentials, ach);}
 	void challenge(AuthStatus &as, auth_challenger_t const *ach) {auth_mod_challenge(mAm, as.getPtr(), ach);}
@@ -48,6 +49,7 @@ private:
 
 	static void registerScheme();
 
+	su_root_t *mRoot = nullptr;
 	static const char *sMethodName;
 	static auth_scheme_t sAuthScheme;
 	static bool sSchemeRegistered;

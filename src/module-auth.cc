@@ -140,8 +140,7 @@ OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const
 
 void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t const *ach) {
 	auto &authStatus = dynamic_cast<OdbcAuthStatus &>(as);
-	AuthenticationListener &listener = authStatus.listener();
-	listener.setData(*this, authStatus, ach);
+	AuthenticationListener *listener = new AuthenticationListener(*this, authStatus, *ach);
 
 	as.allow(as.allow() || auth_allow_check(mAm, as.getPtr()) == 0);
 
@@ -177,10 +176,10 @@ void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t c
 		msg_auth_t *matched_au = ModuleToolbox::findAuthorizationForRealm(as.home(), au, as.realm());
 		if (matched_au)
 			au = matched_au;
-		auth_digest_response_get(as.home(), &listener.mAr, au->au_params);
-		SLOGD << "Using auth digest response for realm " << listener.mAr.ar_realm;
+		auth_digest_response_get(as.home(), &listener->mAr, au->au_params);
+		SLOGD << "Using auth digest response for realm " << listener->mAr.ar_realm;
 		as.match(reinterpret_cast<msg_header_t *>(au));
-		flexisip_auth_check_digest(as, &listener.mAr, ach);
+		flexisip_auth_check_digest(*listener);
 	} else {
 		/* There was no realm or credentials, send challenge */
 		SLOGD << __func__ << ": no credentials matched realm or no realm";
@@ -195,7 +194,7 @@ void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t c
 			AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, as.userUri()->url_user, nullptr);
 			//AuthDbBackend::get()->getPasswordForAlgo(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL, listener);
 		}
-		listener.finish();
+		listener->finish();
 		return;
 	}
 }
@@ -211,16 +210,9 @@ void OdbcAuthModule::onCancel(AuthStatus &as) {
 #define PA "Authorization missing "
 
 /** Verify digest authentication */
-void OdbcAuthModule::flexisip_auth_check_digest(AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach) {
-	AuthenticationListener &listener = dynamic_cast<OdbcAuthStatus &>(as).listener();
-
-	if (ar == NULL || ach == NULL) {
-		as.status(500);
-		as.phrase("Internal Server Error");
-		as.response(nullptr);
-		listener.finish();
-		return;
-	}
+void OdbcAuthModule::flexisip_auth_check_digest(AuthenticationListener &listener) {
+	OdbcAuthStatus &as = listener.authStatus();
+	auth_response_t *ar = listener.response();
 
 	char const *phrase = "Bad authorization ";
 	if ((!ar->ar_username && (phrase = PA "username")) || (!ar->ar_nonce && (phrase = PA "nonce")) ||
@@ -257,14 +249,14 @@ void OdbcAuthModule::flexisip_auth_check_digest(AuthStatus &as, auth_response_t 
 	msg_time_t now = msg_now();
 	if (as.nonceIssued() == 0 /* Already validated nonce */ && auth_validate_digest_nonce(mAm, as.getPtr(), ar, now) < 0) {
 		as.blacklist(mAm->am_blacklist);
-		auth_challenge_digest(mAm, as.getPtr(), ach);
+		auth_challenge_digest(mAm, as.getPtr(), &listener.challenger());
 		mNonceStore.insert(as.response());
 		listener.finish();
 		return;
 	}
 
 	if (as.stale()) {
-		auth_challenge_digest(mAm, as.getPtr(), ach);
+		auth_challenge_digest(mAm, as.getPtr(), &listener.challenger());
 		mNonceStore.insert(as.response());
 		listener.finish();
 		return;
@@ -276,7 +268,7 @@ void OdbcAuthModule::flexisip_auth_check_digest(AuthStatus &as, auth_response_t 
 		if (pnc == -1 || pnc >= nnc) {
 			LOGE("Bad nonce count %d -> %d for %s", pnc, nnc, ar->ar_nonce);
 			as.blacklist(mAm->am_blacklist);
-			auth_challenge_digest(mAm, as.getPtr(), ach);
+			auth_challenge_digest(mAm, as.getPtr(), &listener.challenger());
 			mNonceStore.insert(as.response());
 			listener.finish();
 			return;
@@ -294,15 +286,10 @@ void OdbcAuthModule::flexisip_auth_check_digest(AuthStatus &as, auth_response_t 
 //  Authentication::AuthenticationListener class
 // ====================================================================================================================
 
-AuthenticationListener::AuthenticationListener(Authentication *module, shared_ptr<RequestSipEvent> ev) : mModule(module), mEv(ev) {
+AuthenticationListener::AuthenticationListener(OdbcAuthModule &am, OdbcAuthStatus &as, const auth_challenger_t &ach):
+	mAm(am), mAs(as), mAch(ach) {
 	memset(&mAr, '\0', sizeof(mAr));
 	mAr.ar_size = sizeof(mAr);
-}
-
-void AuthenticationListener::setData(OdbcAuthModule &am, OdbcAuthStatus &as, auth_challenger_t const *ach) {
-	mAm = &am;
-	mAs = &as;
-	mAch = ach;
 }
 
 void AuthenticationListener::main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u) {
@@ -314,7 +301,7 @@ void AuthenticationListener::main_thread_async_response_cb(su_root_magic_t *rm, 
 void AuthenticationListener::onResult(AuthDbResult result, const vector<passwd_algo_t> &passwd) {
 	// invoke callback on main thread (sofia-sip)
 	su_msg_r mamc = SU_MSG_R_INIT;
-	if (-1 == su_msg_create(mamc, su_root_task(getRoot()), su_root_task(getRoot()), main_thread_async_response_cb,
+	if (-1 == su_msg_create(mamc, su_root_task(mAm.getRoot()), su_root_task(mAm.getRoot()), main_thread_async_response_cb,
 		sizeof(AuthenticationListener *))) {
 		LOGF("Couldn't create auth async message");
 		}
@@ -364,7 +351,7 @@ void AuthenticationListener::onResult(AuthDbResult result, const vector<passwd_a
 void AuthenticationListener::onResult(AuthDbResult result, const string &passwd) {
 	// invoke callback on main thread (sofia-sip)
 	su_msg_r mamc = SU_MSG_R_INIT;
-	if (-1 == su_msg_create(mamc, su_root_task(getRoot()), su_root_task(getRoot()), main_thread_async_response_cb,
+	if (-1 == su_msg_create(mamc, su_root_task(mAm.getRoot()), su_root_task(mAm.getRoot()), main_thread_async_response_cb,
 		sizeof(AuthenticationListener *))) {
 		LOGF("Couldn't create auth async message");
 		}
@@ -394,18 +381,11 @@ void AuthenticationListener::onResult(AuthDbResult result, const string &passwd)
 }
 
 void AuthenticationListener::finishForAlgorithm () {
-	if ((mAs->usedAlgo().size() > 1) && (mAs->status() == 401)) {
-		msg_header_t* response = msg_header_copy(mAs->home(), mAs->response());
-		msg_header_remove_param((msg_common_t *)response, "algorithm=MD5");
-		msg_header_replace_item(mAs->home(), (msg_common_t *)response, "algorithm=SHA-256");
-		mEv->reply(mAs->status(), mAs->phrase(), SIPTAG_HEADER((const sip_header_t *)mAs->info()),
-				   SIPTAG_HEADER((const sip_header_t *)response),
-				   SIPTAG_HEADER((const sip_header_t *)mAs->response()),
-				   SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
-	} else {
-		mEv->reply(mAs->status(), mAs->phrase(), SIPTAG_HEADER((const sip_header_t *)mAs->info()),
-				   SIPTAG_HEADER((const sip_header_t *)mAs->response()),
-				   SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
+	if ((mAs.usedAlgo().size() > 1) && (mAs.status() == 401)) {
+		auto *response = reinterpret_cast<msg_auth_t *>(msg_header_copy(mAs.home(), mAs.response()));
+		msg_header_remove_param(reinterpret_cast<msg_common_t *>(mAs.response()), "algorithm=MD5");
+		msg_header_replace_item(mAs.home(), reinterpret_cast<msg_common_t *>(mAs.response()), "algorithm=SHA-256");
+		reinterpret_cast<msg_auth_t *>(mAs.response())->au_next = response;
 	}
 }
 
@@ -413,43 +393,23 @@ void AuthenticationListener::finishForAlgorithm () {
  * return true if the event is terminated
  */
 void AuthenticationListener::finish() {
-	const shared_ptr<MsgSip> &ms = mEv->getMsgSip();
-	const sip_t *sip = ms->getSip();
-	if (mAs->status()) {
-		if (mAs->status() != 401 && mAs->status() != 407) {
-			auto log = make_shared<AuthLog>(sip, mPasswordFound);
-			log->setStatusCode(mAs->status(), mAs->phrase());
-			log->setCompleted();
-			mEv->setEventLog(log);
+	if (mAs.status()) {
+		if (mAs.status() != 401 && mAs.status() != 407) {
+// 			auto log = make_shared<AuthLog>(sip, mPasswordFound);
+// 			log->setStatusCode(mAs->status(), mAs->phrase());
+// 			log->setCompleted();
+// 			mEv->setEventLog(log);
 		}
 		finishForAlgorithm();
-	} else {
-		// Success
-		if (sip->sip_request->rq_method == sip_method_register) {
-			msg_auth_t *au =
-			ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_authorization, mAs->realm());
-			if (au)
-				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
-		} else {
-			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_proxy_authorization, mAs->realm());
-			if(au->au_next)
-				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au->au_next);
-			if (au)
-				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
-		}
-		if (mEv->isSuspended()) {
-			// The event is re-injected
-			getAgent()->injectRequestEvent(mEv);
-		}
 	}
-	if (mModule->mCurrentAuthOp == this) {
-		mModule->mCurrentAuthOp = NULL;
+	if (mAs.getPtr()->as_callback) {
+		mAs.getPtr()->as_callback(mAs.magic(), mAs.getPtr());
 	}
 	delete this;
 }
 
 void AuthenticationListener::finishVerifyAlgos(const vector<passwd_algo_t> &pass) {
-	mAs->usedAlgo().remove_if([&pass](string algo) {
+	mAs.usedAlgo().remove_if([&pass](string algo) {
 		bool found = false;
 
 		for (const auto &password : pass) {
@@ -465,10 +425,6 @@ void AuthenticationListener::finishVerifyAlgos(const vector<passwd_algo_t> &pass
 	finish();
 }
 
-Agent *AuthenticationListener::getAgent() const {
-	return mModule->getAgent();
-}
-
 int AuthenticationListener::checkPasswordMd5(const char *passwd){
 	char const *a1;
 	auth_hexmd5_t a1buf, response;
@@ -478,18 +434,18 @@ int AuthenticationListener::checkPasswordMd5(const char *passwd){
 
 	if (passwd) {
 		mPasswordFound = true;
-		++*getModule()->mCountPassFound;
+// 		++*getModule()->mCountPassFound;
 		strncpy(a1buf, passwd, 33); // remove trailing NULL character
 		a1 = a1buf;
 	} else {
-		++*getModule()->mCountPassNotFound;
+// 		++*getModule()->mCountPassNotFound;
 		auth_digest_a1(&mAr, a1buf, "xyzzy"), a1 = a1buf;
 	}
 
 	if (mAr.ar_md5sess)
 		auth_digest_a1sess(&mAr, a1buf, a1), a1 = a1buf;
 
-	auth_digest_response(&mAr, response, a1, mAs->method(), mAs->body(), mAs->bodyLen());
+	auth_digest_response(&mAr, response, a1, mAs.method(), mAs.body(), mAs.bodyLen());
 	return !passwd || strcmp(response, mAr.ar_response);
 }
 
@@ -503,17 +459,17 @@ int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
 		string a1;
 		if (passwd) {
 			mPasswordFound = true;
-			++*getModule()->mCountPassFound;
+// 			++*getModule()->mCountPassFound;
 			a1 = passwd;
 		} else {
-			++*getModule()->mCountPassNotFound;
+// 			++*getModule()->mCountPassNotFound;
 			a1 = auth_digest_a1_for_algorithm(&mAr, "xyzzy");
 		}
 
 		if (mAr.ar_md5sess)
 			a1 = auth_digest_a1sess_for_algorithm(&mAr, a1);
 
-		string response = auth_digest_response_for_algorithm(&mAr, mAs->method(), mAs->body(), mAs->bodyLen(), a1);
+		string response = auth_digest_response_for_algorithm(&mAr, mAs.method(), mAs.body(), mAs.bodyLen(), a1);
 		return (passwd && response == mAr.ar_response ? 0 : -1);
 	}
 	return -1;
@@ -524,15 +480,15 @@ int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
  */
 void AuthenticationListener::checkPassword(const char *passwd) {
 	if (checkPasswordForAlgorithm(passwd)) {
-		if (mAm->getPtr()->am_forbidden && !mAs->no403()) {
-			mAs->status(403);
-			mAs->phrase("Forbidden");
-			mAs->response(nullptr);
-			mAs->blacklist(mAm->getPtr()->am_blacklist);
+		if (mAm.getPtr()->am_forbidden && !mAs.no403()) {
+			mAs.status(403);
+			mAs.phrase("Forbidden");
+			mAs.response(nullptr);
+			mAs.blacklist(mAm.getPtr()->am_blacklist);
 		} else {
-			auth_challenge_digest(mAm->getPtr(), mAs->getPtr(), mAch);
-			mAm->nonceStore().insert(mAs->response());
-			mAs->blacklist(mAm->getPtr()->am_blacklist);
+			auth_challenge_digest(mAm.getPtr(), mAs.getPtr(), &mAch);
+			mAm.nonceStore().insert(mAs.response());
+			mAs.blacklist(mAm.getPtr()->am_blacklist);
 		}
 		if (passwd) {
 			SLOGUE << "Registration failure, password did not match";
@@ -546,19 +502,19 @@ void AuthenticationListener::checkPassword(const char *passwd) {
 	}
 
 	// assert(apw);
-	mAs->user(mAr.ar_username);
-	mAs->anonymous(false);
+	mAs.user(mAr.ar_username);
+	mAs.anonymous(false);
 
-	if (mAm->getPtr()->am_nextnonce || mAm->getPtr()->am_mutual)
-		auth_info_digest(mAm->getPtr(), mAs->getPtr(), mAch);
+	if (mAm.getPtr()->am_nextnonce || mAm.getPtr()->am_mutual)
+		auth_info_digest(mAm.getPtr(), mAs.getPtr(), &mAch);
 
-	if (mAm->getPtr()->am_challenge)
-		auth_challenge_digest(mAm->getPtr(), mAs->getPtr(), mAch);
+	if (mAm.getPtr()->am_challenge)
+		auth_challenge_digest(mAm.getPtr(), mAs.getPtr(), &mAch);
 
 	LOGD("auth_method_digest: successful authentication");
 
-	mAs->status(0); /* Successful authentication! */
-	mAs->phrase("");
+	mAs.status(0); /* Successful authentication! */
+	mAs.phrase("");
 }
 
 void AuthenticationListener::processResponse() {
@@ -578,10 +534,10 @@ void AuthenticationListener::processResponse() {
 }
 
 void AuthenticationListener::onError() {
-	if (mAs->status() != 0) {
-		mAs->status(500);
-		mAs->phrase("Internal error");
-		mAs->response(nullptr);
+	if (mAs.status() != 0) {
+		mAs.status(500);
+		mAs.phrase("Internal error");
+		mAs.response(nullptr);
 	}
 	finish();
 }
@@ -1057,7 +1013,7 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 	// with retransmissions.
 	ev->createIncomingTransaction();
 
-	auto *as = new OdbcAuthStatus();
+	auto *as = new RequestAuthStatus(ev);
 	as->method(sip->sip_request->rq_method_name);
 	as->source(msg_addrinfo(ms->getMsg()));
 	as->userUri(ppi ? ppi->ppid_url : sip->sip_from->a_url);
@@ -1069,7 +1025,8 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 	}
 	as->no403(mNo403Expr->eval(ev->getSip()));
 	as->usedAlgo() = mAlgorithms;
-	as->listener(new AuthenticationListener(this, ev));
+	using std::placeholders::_1;
+	as->callback(std::bind(&Authentication::processAuthModuleResponse, this, _1 ));
 
 	// Attention: the auth_mod_verify method should not send by itself any message but
 	// return after having set the as status and phrase.
@@ -1080,13 +1037,7 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 	} else {
 		am->verify(*as, sip->sip_proxy_authorization, &mProxyChallenger);
 	}
-	if (mCurrentAuthOp) {
-		/*it has not been cleared by the listener itself, so password checking is still in progress. We need to
-		 * suspend the event*/
-		// Send pending message, needed data will be kept as long
-		// as SipEvent is held in the listener.
-		ev->suspendProcessing();
-	}
+	processAuthModuleResponse(*as);
 }
 
 void Authentication::onResponse(shared_ptr<ResponseSipEvent> &ev) {
@@ -1129,6 +1080,40 @@ bool Authentication::doOnConfigStateChanged(const ConfigValue &conf, ConfigState
 		return true;
 	} else {
 		return Module::doOnConfigStateChanged(conf, state);
+	}
+}
+
+void Authentication::processAuthModuleResponse(const AuthStatus &as) {
+	const shared_ptr<RequestSipEvent> &ev = dynamic_cast<const RequestAuthStatus &>(as).getRequestEvent();
+	if (as.status() == 0) {
+		const std::shared_ptr<MsgSip> &ms = ev->getMsgSip();
+		sip_t *sip = ms->getSip();
+		if (sip->sip_request->rq_method == sip_method_register) {
+			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_authorization, as.realm());
+			if (au)
+				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
+		} else {
+			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_proxy_authorization, as.realm());
+			if(au->au_next)
+				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au->au_next);
+			if (au)
+				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
+		}
+		if (ev->isSuspended()) {
+			// The event is re-injected
+			getAgent()->injectRequestEvent(ev);
+		}
+	} else if (as.status() == 100) {
+		ev->suspendProcessing();
+	} else if (as.status() >= 400) {
+		ev->reply(as.status(), as.phrase(),
+			SIPTAG_HEADER((const sip_header_t *)as.info()),
+			SIPTAG_HEADER((const sip_header_t *)as.response()),
+			SIPTAG_SERVER_STR(getAgent()->getServerString()),
+			TAG_END()
+		);
+	} else {
+		ev->reply(500, "Internal error", TAG_END());
 	}
 }
 

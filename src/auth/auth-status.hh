@@ -18,14 +18,19 @@
 
 #pragma once
 
+#include <functional>
+
 #include <sofia-sip/auth_module.h>
 
 class AuthStatus {
 public:
+	using ResponseCb = std::function<void(AuthStatus &as)>;
+
 	AuthStatus() {
 		su_home_init(&mHome),
 		auth_status_init(&mPriv, sizeof(auth_status_t));
 		mPriv.as_plugin = reinterpret_cast<auth_splugin_t *>(this);
+		mPriv.as_callback = responseCb;
 	}
 	virtual ~AuthStatus() {su_home_deinit(&mHome);}
 
@@ -43,6 +48,9 @@ public:
 
 	bool blacklist() const {return mPriv.as_blacklist;}
 	void blacklist(bool val) {mPriv.as_blacklist = val;}
+
+	const ResponseCb &callback() const {return mResponseCb;}
+	void callback(const ResponseCb &cb) {mResponseCb = cb;}
 
 	const char *display() const {return mPriv.as_display;}
 	void display(const char *val) {mPriv.as_display = val;}
@@ -91,6 +99,12 @@ public:
 	auth_status_t *getPtr() {return &mPriv;}
 
 private:
+	static void responseCb(auth_magic_t *magic, auth_status_t *as) {
+		AuthStatus &authStatus = *reinterpret_cast<AuthStatus *>(as->as_plugin);
+		if (authStatus.mResponseCb) authStatus.mResponseCb(authStatus);
+	}
+
 	su_home_t mHome;
 	auth_status_t mPriv;
+	ResponseCb mResponseCb;
 };

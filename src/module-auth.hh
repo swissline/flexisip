@@ -58,19 +58,17 @@ class AuthenticationListener;
 
 class OdbcAuthStatus : public AuthStatus {
 public:
+	OdbcAuthStatus(): AuthStatus() {}
+
 	bool no403() const {return mNo403;}
 	void no403(bool no403) {mNo403 = no403;}
 
 	std::list<std::string> &usedAlgo() {return mAlgoUsed;}
 
-	AuthenticationListener &listener() {return *mListener;}
-	void listener(AuthenticationListener &l) {mListener = &l;}
-	void listener(AuthenticationListener *l) {mListener = l;}
-
 private:
 	bool mNo403 = false;
 	std::list<std::string> mAlgoUsed;
-	AuthenticationListener *mListener;
+	std::shared_ptr<RequestSipEvent> mEvent;
 };
 
 class OdbcAuthModule : public AuthModule {
@@ -86,7 +84,7 @@ private:
 	void onChallenge(AuthStatus &as, auth_challenger_t const *ach) override;
 	void onCancel(AuthStatus &as) override;
 
-	void flexisip_auth_check_digest(AuthStatus &as, auth_response_t *ar, auth_challenger_t const *ach);
+	void flexisip_auth_check_digest(AuthenticationListener &listener);
 
 	NonceStore mNonceStore;
 	bool mDisableQOPAuth = false;
@@ -99,10 +97,13 @@ class AuthenticationListener : public AuthDbListener {
 public:
 	auth_response_t mAr;
 
-	AuthenticationListener(Authentication *, std::shared_ptr<RequestSipEvent>);
+	AuthenticationListener(OdbcAuthModule &am, OdbcAuthStatus &as, const auth_challenger_t &ach);
 	~AuthenticationListener() override = default;
 
-	void setData(OdbcAuthModule &am, OdbcAuthStatus &as, auth_challenger_t const *ach);
+	OdbcAuthStatus &authStatus() const {return mAs;}
+	const auth_challenger_t &challenger() const {return mAch;}
+	auth_response_t *response() {return &mAr;}
+
 	void checkPassword(const char *password);
 	int checkPasswordMd5(const char *password);
 	int checkPasswordForAlgorithm(const char *password);
@@ -112,10 +113,6 @@ public:
 	void finish(); /*the listener is destroyed when calling this, careful*/
 	void finishForAlgorithm();
 	void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass) override;
-
-	su_root_t *getRoot() {return getAgent()->getRoot();}
-	Agent *getAgent() const;
-	Authentication *getModule() {return mModule;}
 
 private:
 	void processResponse();
@@ -128,11 +125,9 @@ private:
 	static std::string auth_digest_response_for_algorithm(::auth_response_t *ar, char const *method_name, void const *data, isize_t dlen, const std::string &ha1);
 
 	friend class Authentication;
-	Authentication *mModule = nullptr;
-	std::shared_ptr<RequestSipEvent> mEv;
-	OdbcAuthModule *mAm = nullptr;
-	OdbcAuthStatus *mAs = nullptr;
-	const auth_challenger_t *mAch = nullptr;
+	OdbcAuthModule &mAm;
+	OdbcAuthStatus &mAs;
+	const auth_challenger_t &mAch;
 	bool mPasswordFound = false;
 	AuthDbResult mResult;
 	std::string mPassword;
@@ -162,6 +157,18 @@ public:
 	bool doOnConfigStateChanged(const ConfigValue &conf, ConfigState state) override;
 
 private:
+	class RequestAuthStatus : public OdbcAuthStatus {
+	public:
+		RequestAuthStatus(const std::shared_ptr<RequestSipEvent> &ev): OdbcAuthStatus(), mEv(ev) {}
+		~RequestAuthStatus() override = default;
+
+		const std::shared_ptr<RequestSipEvent> &getRequestEvent() const {return mEv;}
+
+	private:
+		std::shared_ptr<RequestSipEvent> mEv;
+	};
+
+	void processAuthModuleResponse(const AuthStatus &as);
 	bool empty(const char *value) {return value == NULL || value[0] == '\0';}
 	const char *findIncomingSubjectInTrusted(std::shared_ptr<RequestSipEvent> &ev, const char *fromDomain);
 	void loadTrustedHosts(const ConfigStringList &trustedHosts);
@@ -169,6 +176,7 @@ private:
 	const GenericStruct *presenceSection = GenericManager::get()->getRoot()->get<GenericStruct>("module::Presence");
 	static ModuleInfo<Authentication> sInfo;
 	std::map<std::string, std::unique_ptr<OdbcAuthModule>> mAuthModules;
+	std::map<std::unique_ptr<AuthStatus>, std::shared_ptr<RequestSipEvent>> mPendingAuths;
 	std::list<std::string> mDomains;
 	std::list<BinaryIp> mTrustedHosts;
 	std::list<std::string> mTrustedClientCertificates;
