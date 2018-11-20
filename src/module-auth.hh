@@ -173,7 +173,6 @@ private:
 	const char *findIncomingSubjectInTrusted(std::shared_ptr<RequestSipEvent> &ev, const char *fromDomain);
 	void loadTrustedHosts(const ConfigStringList &trustedHosts);
 
-	const GenericStruct *presenceSection = GenericManager::get()->getRoot()->get<GenericStruct>("module::Presence");
 	static ModuleInfo<Authentication> sInfo;
 	std::map<std::string, std::unique_ptr<OdbcAuthModule>> mAuthModules;
 	std::map<std::unique_ptr<AuthStatus>, std::shared_ptr<RequestSipEvent>> mPendingAuths;
