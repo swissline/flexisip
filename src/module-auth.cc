@@ -402,9 +402,7 @@ void AuthenticationListener::finish() {
 		}
 		finishForAlgorithm();
 	}
-	if (mAs.getPtr()->as_callback) {
-		mAs.getPtr()->as_callback(mAs.magic(), mAs.getPtr());
-	}
+	mAs.getPtr()->as_callback(mAs.magic(), mAs.getPtr());
 	delete this;
 }
 
@@ -1025,8 +1023,6 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 	}
 	as->no403(mNo403Expr->eval(ev->getSip()));
 	as->usedAlgo() = mAlgorithms;
-	using std::placeholders::_1;
-	as->callback(std::bind(&Authentication::processAuthModuleResponse, this, _1 ));
 
 	// Attention: the auth_mod_verify method should not send by itself any message but
 	// return after having set the as status and phrase.
@@ -1083,7 +1079,7 @@ bool Authentication::doOnConfigStateChanged(const ConfigValue &conf, ConfigState
 	}
 }
 
-void Authentication::processAuthModuleResponse(const AuthStatus &as) {
+void Authentication::processAuthModuleResponse(AuthStatus &as) {
 	const shared_ptr<RequestSipEvent> &ev = dynamic_cast<const RequestAuthStatus &>(as).getRequestEvent();
 	if (as.status() == 0) {
 		const std::shared_ptr<MsgSip> &ms = ev->getMsgSip();
@@ -1104,7 +1100,9 @@ void Authentication::processAuthModuleResponse(const AuthStatus &as) {
 			getAgent()->injectRequestEvent(ev);
 		}
 	} else if (as.status() == 100) {
+		using std::placeholders::_1;
 		ev->suspendProcessing();
+		as.callback(std::bind(&Authentication::processAuthModuleResponse, this, _1 ));
 	} else if (as.status() >= 400) {
 		ev->reply(as.status(), as.phrase(),
 			SIPTAG_HEADER((const sip_header_t *)as.info()),

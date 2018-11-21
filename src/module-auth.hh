@@ -168,7 +168,7 @@ private:
 		std::shared_ptr<RequestSipEvent> mEv;
 	};
 
-	void processAuthModuleResponse(const AuthStatus &as);
+	void processAuthModuleResponse(AuthStatus &as);
 	bool empty(const char *value) {return value == NULL || value[0] == '\0';}
 	const char *findIncomingSubjectInTrusted(std::shared_ptr<RequestSipEvent> &ev, const char *fromDomain);
 	void loadTrustedHosts(const ConfigStringList &trustedHosts);
