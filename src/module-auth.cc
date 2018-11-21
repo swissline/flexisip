@@ -128,6 +128,7 @@ OdbcAuthModule::OdbcAuthModule(su_root_t *root, const std::string &domain, const
 	AuthModule(root,
 		AUTHTAG_REALM(domain.c_str()),
 		AUTHTAG_OPAQUE("+GNywA=="),
+		AUTHTAG_QOP("auth"),
 		AUTHTAG_FORBIDDEN(1),
 		AUTHTAG_ALLOW("ACK CANCEL BYE"),
 		AUTHTAG_ALGORITHM(algo.c_str()),
@@ -278,6 +279,7 @@ void OdbcAuthModule::flexisip_auth_check_digest(AuthenticationListener &listener
 	}
 
 	AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, ar->ar_username, &listener);
+	as.status(100);
 }
 
 // ====================================================================================================================
