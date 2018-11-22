@@ -289,10 +289,7 @@ void OdbcAuthModule::flexisip_auth_check_digest(OdbcAuthStatus &as, msg_auth_t *
 void OdbcAuthModule::finish(OdbcAuthStatus &as) {
 	if (as.status() != 0) {
 		if (as.status() != 401 && as.status() != 407) {
-			// 			auto log = make_shared<AuthLog>(sip, mPasswordFound);
-			// 			log->setStatusCode(mAs->status(), mAs->phrase());
-			// 			log->setCompleted();
-			// 			mEv->setEventLog(log);
+
 		}
 		finishForAlgorithm(as);
 	}
@@ -515,6 +512,7 @@ void AuthenticationListener::processResponse() {
 	switch (mResult) {
 		case PASSWORD_FOUND:
 		case PASSWORD_NOT_FOUND:
+			mAs.passwordFound(mResult == PASSWORD_FOUND);
 			checkPassword(mPassword.c_str());
 			mAm.finish(mAs);
 			break;
@@ -1071,6 +1069,7 @@ bool Authentication::doOnConfigStateChanged(const ConfigValue &conf, ConfigState
 
 void Authentication::processAuthModuleResponse(AuthStatus &as) {
 	const shared_ptr<RequestSipEvent> &ev = dynamic_cast<const RequestAuthStatus &>(as).getRequestEvent();
+	auto &authStatus = dynamic_cast<OdbcAuthStatus &>(as);
 	if (as.status() == 0) {
 		const std::shared_ptr<MsgSip> &ms = ev->getMsgSip();
 		sip_t *sip = ms->getSip();
@@ -1094,6 +1093,12 @@ void Authentication::processAuthModuleResponse(AuthStatus &as) {
 		ev->suspendProcessing();
 		as.callback(std::bind(&Authentication::processAuthModuleResponse, this, _1 ));
 	} else if (as.status() >= 400) {
+		if (as.status() == 401 || as.status() == 407) {
+			auto log = make_shared<AuthLog>(ev->getMsgSip()->getSip(), authStatus.passwordFound());
+			log->setStatusCode(as.status(), as.phrase());
+			log->setCompleted();
+			ev->setEventLog(log);
+		}
 		ev->reply(as.status(), as.phrase(),
 			SIPTAG_HEADER((const sip_header_t *)as.info()),
 			SIPTAG_HEADER((const sip_header_t *)as.response()),

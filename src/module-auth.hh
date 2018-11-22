@@ -63,12 +63,16 @@ public:
 	bool no403() const {return mNo403;}
 	void no403(bool no403) {mNo403 = no403;}
 
+	bool passwordFound() const {return mPasswordFound;}
+	void passwordFound(bool val) {mPasswordFound = val;}
+
 	std::list<std::string> &usedAlgo() {return mAlgoUsed;}
 
 private:
-	bool mNo403 = false;
 	std::list<std::string> mAlgoUsed;
 	std::shared_ptr<RequestSipEvent> mEvent;
+	bool mNo403 = false;
+	bool mPasswordFound = false;
 };
 
 class OdbcAuthModule : public AuthModule {
