@@ -84,20 +84,22 @@ private:
 	void onChallenge(AuthStatus &as, auth_challenger_t const *ach) override;
 	void onCancel(AuthStatus &as) override;
 
-	void flexisip_auth_check_digest(AuthenticationListener &listener);
+	void flexisip_auth_check_digest(OdbcAuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach);
+	void finish(OdbcAuthStatus &as); /*the listener is destroyed when calling this, careful*/
+	void finishForAlgorithm(OdbcAuthStatus &as);
 
 	NonceStore mNonceStore;
 	bool mDisableQOPAuth = false;
 	bool mImmediateRetrievePass = true;
+
+	friend AuthenticationListener;
 };
 
 class Authentication;
 
 class AuthenticationListener : public AuthDbListener {
 public:
-	auth_response_t mAr;
-
-	AuthenticationListener(OdbcAuthModule &am, OdbcAuthStatus &as, const auth_challenger_t &ach);
+	AuthenticationListener(OdbcAuthModule &am, OdbcAuthStatus &as, const auth_challenger_t &ach, const auth_response_t &ar): mAm(am), mAs(as), mAch(ach), mAr(ar) {}
 	~AuthenticationListener() override = default;
 
 	OdbcAuthStatus &authStatus() const {return mAs;}
@@ -110,8 +112,6 @@ public:
 	void onResult(AuthDbResult result, const std::string &passwd) override;
 	void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd) override;
 	void onError();
-	void finish(); /*the listener is destroyed when calling this, careful*/
-	void finishForAlgorithm();
 	void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass) override;
 
 private:
@@ -128,6 +128,7 @@ private:
 	OdbcAuthModule &mAm;
 	OdbcAuthStatus &mAs;
 	const auth_challenger_t &mAch;
+	auth_response_t mAr;
 	bool mPasswordFound = false;
 	AuthDbResult mResult;
 	std::string mPassword;
