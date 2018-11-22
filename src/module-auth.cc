@@ -543,27 +543,27 @@ void AuthenticationListener::onError() {
 }
 
 std::string AuthenticationListener::sha256(const std::string &data) {
-	const size_t hashLen = 32;
-	vector<uint8_t> hash(hashLen);
+	vector<uint8_t> hash(32);
 	bctbx_sha256(reinterpret_cast<const uint8_t *>(data.c_str()), data.size(), hash.size(), hash.data());
 	return toString(hash);
 }
 
 std::string AuthenticationListener::sha256(const void *data, size_t len) {
-	const size_t hashLen = 32;
-	vector<uint8_t> hash(hashLen);
+	vector<uint8_t> hash(32);
 	bctbx_sha256(reinterpret_cast<const uint8_t *>(data), len, hash.size(), hash.data());
 	return toString(hash);
 }
 
 std::string AuthenticationListener::toString(const std::vector<uint8_t> &data) {
-	ostringstream out;
-	out.str().reserve(data.size() * 2);
-	out << hex << setfill('0') << setw(2);
+	char formatedByte[3];
+	string res;
+
+	res.reserve(data.size() * 2);
 	for (const uint8_t &byte : data) {
-		out << unsigned(byte);
+		snprintf(formatedByte, sizeof(formatedByte), "%02hhx", byte);
+		res += formatedByte;
 	}
-	return out.str();
+	return res;
 }
 
 std::string AuthenticationListener::auth_digest_a1_for_algorithm(const ::auth_response_t *ar, const std::string &secret) {
@@ -613,24 +613,18 @@ std::string AuthenticationListener::auth_digest_response_for_algorithm(
 	} else
 		input << method_name << ':' << ar->ar_uri;
 	string ha2 = sha256(input.str());
-	LOGD("A2 = SHA256(%s:%s%s%s)\n", method_name, ar->ar_uri,
-		 ar->ar_auth_int ? ":" : "", ar->ar_auth_int ? Hentity.c_str() : "");
+	SLOGD << "A2 = SHA256(" << input.str() << ")" << endl;
 
 	/* Calculate response */
 	ostringstream input2;
-	input2 << ha1 << ':' << ar->ar_nonce << ':' << ar->ar_nc << ':' << ar->ar_cnonce << ':' << ar->ar_qop << ':' << ha2;
+	input2 << ha1 << ':' << ar->ar_nonce;
+	if (ar->ar_auth || ar->ar_auth_int) {
+		input2 << ':' << ar->ar_nc << ':' << ar->ar_cnonce << ':' << ar->ar_qop;
+	}
+	input2 << ':' << ha2;
 	string response = sha256(input2.str());
-	LOGD("auth_response: %s = SHA256(%s:%s%s%s%s%s%s%s:%s) (qop=%s)\n",
-		response.c_str(), ha1.c_str(), ar->ar_nonce,
-		ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
-		ar->ar_auth ||  ar->ar_auth_int ? ar->ar_nc : "",
-		ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
-		ar->ar_auth ||  ar->ar_auth_int ? ar->ar_cnonce : "",
-		ar->ar_auth ||  ar->ar_auth_int ? ":" : "",
-		ar->ar_auth ||  ar->ar_auth_int ? ar->ar_qop : "",
-		ha2.c_str(),
-		ar->ar_qop ? ar->ar_qop : "NONE"
-	);
+	const char *qop = ar->ar_qop ? ar->ar_qop : "NONE";
+	SLOGD << "auth_response: " << response << " = SHA256(" << input2.str() << ") (qop=" << qop << ")" << endl;
 
 	return response;
 }
