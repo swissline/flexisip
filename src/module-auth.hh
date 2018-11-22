@@ -132,7 +132,6 @@ private:
 	OdbcAuthStatus &mAs;
 	const auth_challenger_t &mAch;
 	auth_response_t mAr;
-	bool mPasswordFound = false;
 	AuthDbResult mResult;
 	std::string mPassword;
 };

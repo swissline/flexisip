@@ -415,7 +415,6 @@ int AuthenticationListener::checkPasswordMd5(const char *passwd){
 		passwd = NULL;
 
 	if (passwd) {
-		mPasswordFound = true;
 // 		++*getModule()->mCountPassFound;
 		strncpy(a1buf, passwd, 33); // remove trailing NULL character
 		a1 = a1buf;
@@ -440,7 +439,6 @@ int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
 
 		string a1;
 		if (passwd) {
-			mPasswordFound = true;
 // 			++*getModule()->mCountPassFound;
 			a1 = passwd;
 		} else {
