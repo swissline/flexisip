@@ -28,16 +28,15 @@
 
 #include "auth-module.hh"
 #include "authdb.hh"
+#include "flexisip-auth-module-base.hh"
 #include "flexisip-auth-status.hh"
 #include "nonce-store.hh"
 
-class FlexisipAuthModule : public AuthModule {
+class FlexisipAuthModule : public FlexisipAuthModuleBase {
 public:
-	FlexisipAuthModule(su_root_t *root, const std::string &domain, const std::string &algo);
-	FlexisipAuthModule(su_root_t *root, const std::string &domain, const std::string &algo, int nonceExpire);
+	FlexisipAuthModule(su_root_t *root, const std::string &domain, const std::string &algo): FlexisipAuthModuleBase(root, domain, algo) {}
+	FlexisipAuthModule(su_root_t *root, const std::string &domain, const std::string &algo, int nonceExpire): FlexisipAuthModuleBase(root, domain, algo, nonceExpire) {}
 	~FlexisipAuthModule() override = default;
-
-	NonceStore &nonceStore() {return mNonceStore;}
 
 private:
 	class AuthenticationListener : public AuthDbListener {
@@ -68,17 +67,13 @@ private:
 		std::string mPassword;
 	};
 
-	void onCheck(AuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) override;
-	void onChallenge(AuthStatus &as, auth_challenger_t const *ach) override;
-	void onCancel(AuthStatus &as) override;
+	void checkAuthHeader(FlexisipAuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach) override;
+	void loadPassword(const FlexisipAuthStatus &as) override;
 
-	void flexisip_auth_check_digest(FlexisipAuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach);
-	void finish(FlexisipAuthStatus &as);
 	void processResponse(AuthenticationListener &listener);
 	void checkPassword(FlexisipAuthStatus &as, const auth_challenger_t &ach, auth_response_t &ar, const char *password);
 	int checkPasswordForAlgorithm(FlexisipAuthStatus &as, auth_response_t &ar, const char *password);
 	int checkPasswordMd5(FlexisipAuthStatus &as, auth_response_t &ar, const char *passwd);
-	void onError(FlexisipAuthStatus &as);
 
 	static std::string auth_digest_a1_for_algorithm(const auth_response_t *ar, const std::string &secret);
 	static std::string auth_digest_a1sess_for_algorithm(const auth_response_t *ar, const std::string &ha1);
@@ -86,8 +81,4 @@ private:
 	static std::string sha256(const std::string &data);
 	static std::string sha256(const void *data, size_t len);
 	static std::string toString(const std::vector<uint8_t> &data);
-
-	NonceStore mNonceStore;
-	bool mDisableQOPAuth = false;
-	bool mImmediateRetrievePass = true;
 };
