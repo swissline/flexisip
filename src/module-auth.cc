@@ -287,22 +287,13 @@ void OdbcAuthModule::flexisip_auth_check_digest(OdbcAuthStatus &as, msg_auth_t *
  * return true if the event is terminated
  */
 void OdbcAuthModule::finish(OdbcAuthStatus &as) {
-	if (as.status() != 0) {
-		if (as.status() != 401 && as.status() != 407) {
-
-		}
-		finishForAlgorithm(as);
-	}
-	as.getPtr()->as_callback(as.magic(), as.getPtr());
-}
-
-void OdbcAuthModule::finishForAlgorithm (OdbcAuthStatus &as) {
 	if ((as.usedAlgo().size() > 1) && (as.status() == 401)) {
 		auto *response = reinterpret_cast<msg_auth_t *>(msg_header_copy(as.home(), as.response()));
 		msg_header_remove_param(reinterpret_cast<msg_common_t *>(as.response()), "algorithm=MD5");
 		msg_header_replace_item(as.home(), reinterpret_cast<msg_common_t *>(as.response()), "algorithm=SHA-256");
 		reinterpret_cast<msg_auth_t *>(as.response())->au_next = response;
 	}
+	as.getPtr()->as_callback(as.magic(), as.getPtr());
 }
 
 // ====================================================================================================================

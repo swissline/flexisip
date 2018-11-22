@@ -90,7 +90,6 @@ private:
 
 	void flexisip_auth_check_digest(OdbcAuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach);
 	void finish(OdbcAuthStatus &as); /*the listener is destroyed when calling this, careful*/
-	void finishForAlgorithm(OdbcAuthStatus &as);
 
 	NonceStore mNonceStore;
 	bool mDisableQOPAuth = false;
