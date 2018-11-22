@@ -89,7 +89,19 @@ private:
 	void onCancel(AuthStatus &as) override;
 
 	void flexisip_auth_check_digest(OdbcAuthStatus &as, msg_auth_t *credentials, auth_challenger_t const *ach);
-	void finish(OdbcAuthStatus &as); /*the listener is destroyed when calling this, careful*/
+	void finish(OdbcAuthStatus &as);
+	void processResponse(AuthenticationListener &listener);
+	void checkPassword(OdbcAuthStatus &as, const auth_challenger_t &ach, auth_response_t &ar, const char *password);
+	int checkPasswordForAlgorithm(OdbcAuthStatus &as, auth_response_t &ar, const char *password);
+	int checkPasswordMd5(OdbcAuthStatus &as, auth_response_t &ar, const char *passwd);
+	void onError(OdbcAuthStatus &as);
+
+	static std::string auth_digest_a1_for_algorithm(const auth_response_t *ar, const std::string &secret);
+	static std::string auth_digest_a1sess_for_algorithm(const auth_response_t *ar, const std::string &ha1);
+	static std::string auth_digest_response_for_algorithm(::auth_response_t *ar, char const *method_name, void const *data, isize_t dlen, const std::string &ha1);
+	static std::string sha256(const std::string &data);
+	static std::string sha256(const void *data, size_t len);
+	static std::string toString(const std::vector<uint8_t> &data);
 
 	NonceStore mNonceStore;
 	bool mDisableQOPAuth = false;
@@ -109,23 +121,15 @@ public:
 	const auth_challenger_t &challenger() const {return mAch;}
 	auth_response_t *response() {return &mAr;}
 
-	void checkPassword(const char *password);
-	int checkPasswordMd5(const char *password);
-	int checkPasswordForAlgorithm(const char *password);
+	std::string password() const {return mPassword;}
+	AuthDbResult result() const {return mResult;}
+
 	void onResult(AuthDbResult result, const std::string &passwd) override;
 	void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd) override;
-	void onError();
 	void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass) override;
 
 private:
-	void processResponse();
 	static void main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u);
-	static std::string sha256(const std::string &data);
-	static std::string sha256(const void *data, size_t len);
-	static std::string toString(const std::vector<uint8_t> &data);
-	static std::string auth_digest_a1_for_algorithm(const auth_response_t *ar, const std::string &secret);
-	static std::string auth_digest_a1sess_for_algorithm(const auth_response_t *ar, const std::string &ha1);
-	static std::string auth_digest_response_for_algorithm(::auth_response_t *ar, char const *method_name, void const *data, isize_t dlen, const std::string &ha1);
 
 	friend class Authentication;
 	OdbcAuthModule &mAm;

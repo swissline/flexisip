@@ -190,7 +190,6 @@ void OdbcAuthModule::onCheck(AuthStatus &as, msg_auth_t *au, auth_challenger_t c
 			SLOGD << "Searching for " << as.userUri()->url_user
 			<< " password to have it when the authenticated request comes";
 			AuthDbBackend::get()->getPassword(as.userUri()->url_user, as.userUri()->url_host, as.userUri()->url_user, nullptr);
-			//AuthDbBackend::get()->getPasswordForAlgo(as->as_user_uri->url_user, as->as_user_uri->url_host, as->as_user_uri->url_user, NULL, listener);
 		}
 		finish(authStatus);
 		return;
@@ -296,6 +295,209 @@ void OdbcAuthModule::finish(OdbcAuthStatus &as) {
 	as.getPtr()->as_callback(as.magic(), as.getPtr());
 }
 
+void OdbcAuthModule::processResponse(AuthenticationListener &l) {
+	switch (l.result()) {
+		case PASSWORD_FOUND:
+		case PASSWORD_NOT_FOUND:
+			l.authStatus().passwordFound(l.result() == PASSWORD_FOUND);
+			checkPassword(l.authStatus(), l.challenger(), *l.response(), l.password().c_str());
+			finish(l.authStatus());
+			break;
+		case AUTH_ERROR:
+			onError(l.authStatus());
+			break;
+		default:
+			LOGE("Unhandled asynchronous response %u", l.result());
+			onError(l.authStatus());
+	}
+}
+
+/**
+ * NULL if passwd not found.
+ */
+void OdbcAuthModule::checkPassword(OdbcAuthStatus &as, const auth_challenger_t &ach, auth_response_t &ar, const char *password) {
+	if (checkPasswordForAlgorithm(as, ar, password)) {
+		if (getPtr()->am_forbidden && !as.no403()) {
+			as.status(403);
+			as.phrase("Forbidden");
+			as.response(nullptr);
+			as.blacklist(getPtr()->am_blacklist);
+		} else {
+			auth_challenge_digest(getPtr(), as.getPtr(), &ach);
+			nonceStore().insert(as.response());
+			as.blacklist(getPtr()->am_blacklist);
+		}
+		if (password) {
+			SLOGUE << "Registration failure, password did not match";
+			LOGD("auth_method_digest: password '%s' did not match", password);
+		} else {
+			SLOGUE << "Registration failure, no password";
+			LOGD("auth_method_digest: no password");
+		}
+
+		return;
+	}
+
+	// assert(apw);
+	as.user(ar.ar_username);
+	as.anonymous(false);
+
+	if (getPtr()->am_nextnonce || getPtr()->am_mutual)
+		auth_info_digest(getPtr(), as.getPtr(), &ach);
+
+	if (getPtr()->am_challenge)
+		auth_challenge_digest(getPtr(), as.getPtr(), &ach);
+
+	LOGD("auth_method_digest: successful authentication");
+
+	as.status(0); /* Successful authentication! */
+	as.phrase("");
+}
+
+int OdbcAuthModule::checkPasswordForAlgorithm(OdbcAuthStatus &as, auth_response_t &ar, const char *passwd) {
+	if ((ar.ar_algorithm == NULL) || (!strcmp(ar.ar_algorithm, "MD5"))) {
+		return checkPasswordMd5(as, ar, passwd);
+	} else if (!strcmp(ar.ar_algorithm, "SHA-256")) {
+		if (passwd && passwd[0] == '\0')
+			passwd = NULL;
+
+		string a1;
+		if (passwd) {
+			// 			++*getModule()->mCountPassFound;
+			a1 = passwd;
+		} else {
+			// 			++*getModule()->mCountPassNotFound;
+			a1 = auth_digest_a1_for_algorithm(&ar, "xyzzy");
+		}
+
+		if (ar.ar_md5sess)
+			a1 = auth_digest_a1sess_for_algorithm(&ar, a1);
+
+		string response = auth_digest_response_for_algorithm(&ar, as.method(), as.body(), as.bodyLen(), a1);
+		return (passwd && response == ar.ar_response ? 0 : -1);
+	}
+	return -1;
+}
+
+int OdbcAuthModule::checkPasswordMd5(OdbcAuthStatus &as, auth_response_t &ar, const char *passwd){
+	char const *a1;
+	auth_hexmd5_t a1buf, response;
+
+	if (passwd && passwd[0] == '\0')
+		passwd = NULL;
+
+	if (passwd) {
+		// 		++*getModule()->mCountPassFound;
+		strncpy(a1buf, passwd, 33); // remove trailing NULL character
+		a1 = a1buf;
+	} else {
+		// 		++*getModule()->mCountPassNotFound;
+		auth_digest_a1(&ar, a1buf, "xyzzy"), a1 = a1buf;
+	}
+
+	if (ar.ar_md5sess)
+		auth_digest_a1sess(&ar, a1buf, a1), a1 = a1buf;
+
+	auth_digest_response(&ar, response, a1, as.method(), as.body(), as.bodyLen());
+	return !passwd || strcmp(response, ar.ar_response);
+}
+
+void OdbcAuthModule::onError(OdbcAuthStatus &as) {
+	if (as.status() != 0) {
+		as.status(500);
+		as.phrase("Internal error");
+		as.response(nullptr);
+	}
+	finish(as);
+}
+
+std::string OdbcAuthModule::auth_digest_a1_for_algorithm(const ::auth_response_t *ar, const std::string &secret) {
+	ostringstream data;
+	data << ar->ar_username << ':' << ar->ar_realm << ':' << secret;
+	string ha1 = sha256(data.str());
+	SLOGD << "auth_digest_ha1() has A1 = SHA256(" << ar->ar_username << ':' << ar->ar_realm << ":*******) = " << ha1 << endl;
+	return ha1;
+}
+
+std::string OdbcAuthModule::auth_digest_a1sess_for_algorithm(const ::auth_response_t *ar, const std::string &ha1) {
+	ostringstream data;
+	data << ha1 << ':' << ar->ar_nonce << ':' << ar->ar_cnonce;
+	string newHa1 = sha256(data.str());
+	SLOGD << "auth_sessionkey has A1' = SHA256(" << data.str() << ") = " << newHa1 << endl;
+	return newHa1;
+}
+
+std::string OdbcAuthModule::auth_digest_response_for_algorithm(
+	::auth_response_t *ar,
+	char const *method_name,
+	void const *data,
+	isize_t dlen,
+	const std::string &ha1
+) {
+	if (ar->ar_auth_int)
+		ar->ar_qop = "auth-int";
+	else if (ar->ar_auth)
+		ar->ar_qop = "auth";
+	else
+		ar->ar_qop = NULL;
+
+	/* Calculate Hentity */
+	string Hentity;
+	if (ar->ar_auth_int) {
+		if (data && dlen) {
+			Hentity = sha256(data, dlen);
+		} else {
+			Hentity = "d7580069de562f5c7fd932cc986472669122da91a0f72f30ef1b20ad6e4f61a3";
+		}
+	}
+
+	/* Calculate A2 */
+	ostringstream input;
+	if (ar->ar_auth_int) {
+		input << method_name << ':' << ar->ar_uri << ':' << Hentity;
+	} else
+		input << method_name << ':' << ar->ar_uri;
+	string ha2 = sha256(input.str());
+	SLOGD << "A2 = SHA256(" << input.str() << ")" << endl;
+
+	/* Calculate response */
+	ostringstream input2;
+	input2 << ha1 << ':' << ar->ar_nonce;
+	if (ar->ar_auth || ar->ar_auth_int) {
+		input2 << ':' << ar->ar_nc << ':' << ar->ar_cnonce << ':' << ar->ar_qop;
+	}
+	input2 << ':' << ha2;
+	string response = sha256(input2.str());
+	const char *qop = ar->ar_qop ? ar->ar_qop : "NONE";
+	SLOGD << "auth_response: " << response << " = SHA256(" << input2.str() << ") (qop=" << qop << ")" << endl;
+
+	return response;
+}
+
+std::string OdbcAuthModule::sha256(const std::string &data) {
+	vector<uint8_t> hash(32);
+	bctbx_sha256(reinterpret_cast<const uint8_t *>(data.c_str()), data.size(), hash.size(), hash.data());
+	return toString(hash);
+}
+
+std::string OdbcAuthModule::sha256(const void *data, size_t len) {
+	vector<uint8_t> hash(32);
+	bctbx_sha256(reinterpret_cast<const uint8_t *>(data), len, hash.size(), hash.data());
+	return toString(hash);
+}
+
+std::string OdbcAuthModule::toString(const std::vector<uint8_t> &data) {
+	char formatedByte[3];
+	string res;
+
+	res.reserve(data.size() * 2);
+	for (const uint8_t &byte : data) {
+		snprintf(formatedByte, sizeof(formatedByte), "%02hhx", byte);
+		res += formatedByte;
+	}
+	return res;
+}
+
 // ====================================================================================================================
 
 // ====================================================================================================================
@@ -303,9 +505,9 @@ void OdbcAuthModule::finish(OdbcAuthStatus &as) {
 // ====================================================================================================================
 
 void AuthenticationListener::main_thread_async_response_cb(su_root_magic_t *rm, su_msg_r msg, void *u) {
-	AuthenticationListener **listenerStorage = (AuthenticationListener **)su_msg_data(msg);
-	AuthenticationListener *listener = *listenerStorage;
-	listener->processResponse();
+	AuthenticationListener &listener = **reinterpret_cast<AuthenticationListener **>(su_msg_data(msg));
+	listener.mAm.processResponse(listener);
+	delete &listener;
 }
 
 void AuthenticationListener::onResult(AuthDbResult result, const vector<passwd_algo_t> &passwd) {
@@ -405,209 +607,6 @@ void AuthenticationListener::finishVerifyAlgos(const vector<passwd_algo_t> &pass
 	});
 
 	mAm.finish(mAs);
-}
-
-int AuthenticationListener::checkPasswordMd5(const char *passwd){
-	char const *a1;
-	auth_hexmd5_t a1buf, response;
-
-	if (passwd && passwd[0] == '\0')
-		passwd = NULL;
-
-	if (passwd) {
-// 		++*getModule()->mCountPassFound;
-		strncpy(a1buf, passwd, 33); // remove trailing NULL character
-		a1 = a1buf;
-	} else {
-// 		++*getModule()->mCountPassNotFound;
-		auth_digest_a1(&mAr, a1buf, "xyzzy"), a1 = a1buf;
-	}
-
-	if (mAr.ar_md5sess)
-		auth_digest_a1sess(&mAr, a1buf, a1), a1 = a1buf;
-
-	auth_digest_response(&mAr, response, a1, mAs.method(), mAs.body(), mAs.bodyLen());
-	return !passwd || strcmp(response, mAr.ar_response);
-}
-
-int AuthenticationListener::checkPasswordForAlgorithm(const char *passwd) {
-	if ((mAr.ar_algorithm == NULL) || (!strcmp(mAr.ar_algorithm, "MD5"))) {
-		return checkPasswordMd5(passwd);
-	} else if (!strcmp(mAr.ar_algorithm, "SHA-256")) {
-		if (passwd && passwd[0] == '\0')
-			passwd = NULL;
-
-		string a1;
-		if (passwd) {
-// 			++*getModule()->mCountPassFound;
-			a1 = passwd;
-		} else {
-// 			++*getModule()->mCountPassNotFound;
-			a1 = auth_digest_a1_for_algorithm(&mAr, "xyzzy");
-		}
-
-		if (mAr.ar_md5sess)
-			a1 = auth_digest_a1sess_for_algorithm(&mAr, a1);
-
-		string response = auth_digest_response_for_algorithm(&mAr, mAs.method(), mAs.body(), mAs.bodyLen(), a1);
-		return (passwd && response == mAr.ar_response ? 0 : -1);
-	}
-	return -1;
-}
-
-/**
- * NULL if passwd not found.
- */
-void AuthenticationListener::checkPassword(const char *passwd) {
-	if (checkPasswordForAlgorithm(passwd)) {
-		if (mAm.getPtr()->am_forbidden && !mAs.no403()) {
-			mAs.status(403);
-			mAs.phrase("Forbidden");
-			mAs.response(nullptr);
-			mAs.blacklist(mAm.getPtr()->am_blacklist);
-		} else {
-			auth_challenge_digest(mAm.getPtr(), mAs.getPtr(), &mAch);
-			mAm.nonceStore().insert(mAs.response());
-			mAs.blacklist(mAm.getPtr()->am_blacklist);
-		}
-		if (passwd) {
-			SLOGUE << "Registration failure, password did not match";
-			LOGD("auth_method_digest: password '%s' did not match", passwd);
-		} else {
-			SLOGUE << "Registration failure, no password";
-			LOGD("auth_method_digest: no password");
-		}
-
-		return;
-	}
-
-	// assert(apw);
-	mAs.user(mAr.ar_username);
-	mAs.anonymous(false);
-
-	if (mAm.getPtr()->am_nextnonce || mAm.getPtr()->am_mutual)
-		auth_info_digest(mAm.getPtr(), mAs.getPtr(), &mAch);
-
-	if (mAm.getPtr()->am_challenge)
-		auth_challenge_digest(mAm.getPtr(), mAs.getPtr(), &mAch);
-
-	LOGD("auth_method_digest: successful authentication");
-
-	mAs.status(0); /* Successful authentication! */
-	mAs.phrase("");
-}
-
-void AuthenticationListener::processResponse() {
-	switch (mResult) {
-		case PASSWORD_FOUND:
-		case PASSWORD_NOT_FOUND:
-			mAs.passwordFound(mResult == PASSWORD_FOUND);
-			checkPassword(mPassword.c_str());
-			mAm.finish(mAs);
-			break;
-		case AUTH_ERROR:
-			onError();
-			break;
-		default:
-			LOGE("Unhandled asynchronous response %u", mResult);
-			onError();
-	}
-}
-
-void AuthenticationListener::onError() {
-	if (mAs.status() != 0) {
-		mAs.status(500);
-		mAs.phrase("Internal error");
-		mAs.response(nullptr);
-	}
-	mAm.finish(mAs);
-}
-
-std::string AuthenticationListener::sha256(const std::string &data) {
-	vector<uint8_t> hash(32);
-	bctbx_sha256(reinterpret_cast<const uint8_t *>(data.c_str()), data.size(), hash.size(), hash.data());
-	return toString(hash);
-}
-
-std::string AuthenticationListener::sha256(const void *data, size_t len) {
-	vector<uint8_t> hash(32);
-	bctbx_sha256(reinterpret_cast<const uint8_t *>(data), len, hash.size(), hash.data());
-	return toString(hash);
-}
-
-std::string AuthenticationListener::toString(const std::vector<uint8_t> &data) {
-	char formatedByte[3];
-	string res;
-
-	res.reserve(data.size() * 2);
-	for (const uint8_t &byte : data) {
-		snprintf(formatedByte, sizeof(formatedByte), "%02hhx", byte);
-		res += formatedByte;
-	}
-	return res;
-}
-
-std::string AuthenticationListener::auth_digest_a1_for_algorithm(const ::auth_response_t *ar, const std::string &secret) {
-	ostringstream data;
-	data << ar->ar_username << ':' << ar->ar_realm << ':' << secret;
-	string ha1 = sha256(data.str());
-	SLOGD << "auth_digest_ha1() has A1 = SHA256(" << ar->ar_username << ':' << ar->ar_realm << ":*******) = " << ha1 << endl;
-	return ha1;
-}
-
-std::string AuthenticationListener::auth_digest_a1sess_for_algorithm(const ::auth_response_t *ar, const std::string &ha1) {
-	ostringstream data;
-	data << ha1 << ':' << ar->ar_nonce << ':' << ar->ar_cnonce;
-	string newHa1 = sha256(data.str());
-	SLOGD << "auth_sessionkey has A1' = SHA256(" << data.str() << ") = " << newHa1 << endl;
-	return newHa1;
-}
-
-std::string AuthenticationListener::auth_digest_response_for_algorithm(
-	::auth_response_t *ar,
-	char const *method_name,
-	void const *data,
-	isize_t dlen,
-	const std::string &ha1
-) {
-	if (ar->ar_auth_int)
-		ar->ar_qop = "auth-int";
-	else if (ar->ar_auth)
-		ar->ar_qop = "auth";
-	else
-		ar->ar_qop = NULL;
-
-	/* Calculate Hentity */
-	string Hentity;
-	if (ar->ar_auth_int) {
-		if (data && dlen) {
-			Hentity = sha256(data, dlen);
-		} else {
-			Hentity = "d7580069de562f5c7fd932cc986472669122da91a0f72f30ef1b20ad6e4f61a3";
-		}
-	}
-
-	/* Calculate A2 */
-	ostringstream input;
-	if (ar->ar_auth_int) {
-		input << method_name << ':' << ar->ar_uri << ':' << Hentity;
-	} else
-		input << method_name << ':' << ar->ar_uri;
-	string ha2 = sha256(input.str());
-	SLOGD << "A2 = SHA256(" << input.str() << ")" << endl;
-
-	/* Calculate response */
-	ostringstream input2;
-	input2 << ha1 << ':' << ar->ar_nonce;
-	if (ar->ar_auth || ar->ar_auth_int) {
-		input2 << ':' << ar->ar_nc << ':' << ar->ar_cnonce << ':' << ar->ar_qop;
-	}
-	input2 << ':' << ha2;
-	string response = sha256(input2.str());
-	const char *qop = ar->ar_qop ? ar->ar_qop : "NONE";
-	SLOGD << "auth_response: " << response << " = SHA256(" << input2.str() << ") (qop=" << qop << ")" << endl;
-
-	return response;
 }
 
 // ====================================================================================================================
