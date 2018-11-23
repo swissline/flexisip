@@ -49,9 +49,15 @@ Authentication::~Authentication() {
 
 void Authentication::onDeclare(GenericStruct *mc) {
 	ConfigItemDescriptor items[] = {
-		{StringList, "auth-domains", "List of whitespace separated domain names to challenge. Others are denied.", "localhost"},
+		{StringList, "auth-domains",
+			"List of whitespace separated domain names to challenge. Others are denied.",
+			"localhost"
+		},
 		{StringList, "trusted-hosts", "List of whitespace separated IP which will not be challenged.", ""},
-		{String, "db-implementation", "Database backend implementation for digest authentication [odbc,soci,file].", "file"},
+		{String, "db-implementation",
+			"Database backend implementation for digest authentication [odbc,soci,file].",
+			"file"
+		},
 		{String, "datasource",
 			"Odbc connection string to use for connecting to database. "
 			"ex1: DSN=myodbc3; where 'myodbc3' is the datasource name. "
@@ -80,12 +86,13 @@ void Authentication::onDeclare(GenericStruct *mc) {
 			" no certificate is requested to the client otherwise.",
 			"false"
 		},
-		{String, "tls-client-certificate-required-subject", "An optional regular expression matched against subjects of presented"
-			" client certificates. If this regular expression evaluates to false, the request is rejected. "
+		{String, "tls-client-certificate-required-subject", "An optional regular expression matched against subjects "
+			"of presented client certificates. If this regular expression evaluates to false, the request is rejected. "
 			"The matched subjects are, in order: subjectAltNames.DNS, subjectAltNames.URI, subjectAltNames.IP and CN.",
 			""
 		},
-		{Boolean, "new-auth-on-407", "When receiving a proxy authenticate challenge, generate a new challenge for this proxy.", "false"},
+		{Boolean, "new-auth-on-407", "When receiving a proxy authenticate challenge, generate a new challenge for "
+			"this proxy.", "false"},
 		{Boolean, "enable-test-accounts-creation",
 			"Enable a feature useful for automatic tests, allowing a client to create a temporary account in the "
 			"password database in memory."
@@ -162,9 +169,18 @@ void Authentication::onLoad(const GenericStruct *mc) {
 
 	for (const string &domain : mDomains) {
 		if (mDisableQOPAuth) {
-			mAuthModules[domain].reset(new FlexisipAuthModule(getAgent()->getRoot(), domain, mAlgorithms.front()));
+			mAuthModules[domain].reset(
+				new FlexisipAuthModule(getAgent()->getRoot(),
+				domain,
+				mAlgorithms.front())
+			);
 		} else {
-			mAuthModules[domain].reset(new FlexisipAuthModule(getAgent()->getRoot(), domain, mAlgorithms.front(), nonceExpires));
+			mAuthModules[domain].reset(
+				new FlexisipAuthModule(getAgent()->getRoot(),
+				domain,
+				mAlgorithms.front(),
+				nonceExpires)
+			);
 		}
 		SLOGI << "Found auth domain: " << domain;
 	}
@@ -175,7 +191,10 @@ void Authentication::onLoad(const GenericStruct *mc) {
 		if (res != 0) {
 			string err_msg(128,0);
 			regerror(res, &mRequiredSubject, &err_msg[0], err_msg.capacity());
-			LOGF("Could not compile regex for 'tls-client-certificate-required-subject' '%s': %s", requiredSubject.c_str(), err_msg.c_str());
+			LOGF("Could not compile regex for 'tls-client-certificate-required-subject' '%s': %s",
+				 requiredSubject.c_str(),
+				 err_msg.c_str()
+			);
 		}else mRequiredSubjectCheckSet = true;
 	}
 	mRejectWrongClientCertificates = mc->get<ConfigBoolean>("reject-wrong-client-certificates")->read();
@@ -222,8 +241,12 @@ bool Authentication::handleTestAccountCreationRequests(shared_ptr<RequestSipEven
 				phone_alias = phone_alias ? phone_alias : "";
 				AuthDbBackend::get()->createAccount(url->url_user, url->url_host, url->url_user, url->url_password,
 													sip->sip_expires->ex_delta, phone_alias);
-				LOGD("Account created for %s@%s with password %s and expires %lu%s%s", url->url_user, url->url_host,
-					 url->url_password, sip->sip_expires->ex_delta, phone_alias ? " with phone alias " : "", phone_alias);
+
+				ostringstream os;
+				os << "Account created for " << url->url_user << '@' << url->url_host << " with password "
+					<< url->url_password << " and expires " << sip->sip_expires->ex_delta;
+				if (phone_alias) os << " with phone alias " << phone_alias;
+				SLOGD << os.str();
 				return true;
 			}
 		}
@@ -317,7 +340,8 @@ bool Authentication::handleTlsClientAuthentication(shared_ptr<RequestSipEvent> &
 				}
 
 				LOGE("Client is presenting a TLS certificate not matching its identity.");
-				SLOGUE << "Registration failure for " << url_as_string(home.home(), from) << ", TLS certificate doesn't match its identity";
+				SLOGUE << "Registration failure for " << url_as_string(home.home(), from)
+					<< ", TLS certificate doesn't match its identity";
 				goto bad_certificate;
 
 				postcheck:
@@ -355,7 +379,14 @@ void Authentication::onRequest(shared_ptr<RequestSipEvent> &ev) {
 
 	// handle account creation request (test feature only)
 	if (mTestAccountsEnabled && handleTestAccountCreationRequests(ev)) {
-		ev->reply(200, "Test account created", SIPTAG_SERVER_STR(getAgent()->getServerString()), SIPTAG_CONTACT(sip->sip_contact), SIPTAG_EXPIRES_STR("0"), TAG_END());
+		ev->reply(
+			200,
+			"Test account created",
+			SIPTAG_SERVER_STR(getAgent()->getServerString()),
+			SIPTAG_CONTACT(sip->sip_contact),
+			SIPTAG_EXPIRES_STR("0"),
+			TAG_END()
+		);
 		return;
 	}
 
@@ -475,15 +506,20 @@ void Authentication::processAuthModuleResponse(AuthStatus &as) {
 		const std::shared_ptr<MsgSip> &ms = ev->getMsgSip();
 		sip_t *sip = ms->getSip();
 		if (sip->sip_request->rq_method == sip_method_register) {
-			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_authorization, as.realm());
-			if (au)
-				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
+			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(
+				ms->getHome(),
+				sip->sip_authorization,
+				as.realm()
+			);
+			if (au) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
 		} else {
-			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(ms->getHome(), sip->sip_proxy_authorization, as.realm());
-			if(au->au_next)
-				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au->au_next);
-			if (au)
-				msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
+			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(
+				ms->getHome(),
+				sip->sip_proxy_authorization,
+				as.realm()
+			);
+			if (au->au_next) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au->au_next);
+			if (au) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
 		}
 		if (ev->isSuspended()) {
 			// The event is re-injected
@@ -561,23 +597,23 @@ void Authentication::loadTrustedHosts(const ConfigStringList &trustedHosts) {
 				mTrustedHosts.push_back(host);
 			}
 		} else {
-			SLOGW << "Could not parse presence server URL '" << presenceServer << "', cannot be added to trusted hosts!";
+			SLOGW << "Could not parse presence server URL '" << presenceServer
+				<< "', cannot be added to trusted hosts!";
 		}
 	}
 }
 
 ModuleInfo<Authentication> Authentication::sInfo(
 	"Authentication",
-	"The authentication module challenges and authenticates SIP requests using two possible methods: \n"
+	"The authentication module challenges and authenticates SIP requests using two possible methods:\n"
 	" * if the request is received via a TLS transport and 'require-peer-certificate' is set in transport definition "
-	"in [Global] section for this transport, "
-	" then the From header of the request is matched with the CN claimed by the client certificate. The CN must "
-	"contain sip:user@domain or alternate name with URI=sip:user@domain"
-	" corresponding to the URI in the from header for the request to be accepted. Optionnaly, the property"
-	" tls-client-certificate-required-subject may contain a regular expression for additional checks to execute on certificate subjects.\n"
+	"in [Global] section for this transport, then the From header of the request is matched with the CN claimed by "
+	"the client certificate. The CN must contain sip:user@domain or alternate name with URI=sip:user@domain "
+	"corresponding to the URI in the from header for the request to be accepted. Optionnaly, the property "
+	"tls-client-certificate-required-subject may contain a regular expression for additional checks to execute on "
+	"certificate subjects.\n"
 	" * if no TLS client based authentication can be performed, or is failed, then a SIP digest authentication is "
-	"performed. The password verification is made by querying"
-	" a database or a password file on disk.",
+	"performed. The password verification is made by querying a database or a password file on disk.",
 	{ "NatHelper" },
 	ModuleInfoBase::ModuleOid::Authentication
 );
