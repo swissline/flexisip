@@ -493,6 +493,7 @@ void Authentication::processAuthModuleResponse(AuthStatus &as) {
 		using std::placeholders::_1;
 		ev->suspendProcessing();
 		as.callback(std::bind(&Authentication::processAuthModuleResponse, this, _1 ));
+		return;
 	} else if (as.status() >= 400) {
 		if (as.status() == 401 || as.status() == 407) {
 			auto log = make_shared<AuthLog>(ev->getMsgSip()->getSip(), authStatus.passwordFound());
@@ -509,6 +510,7 @@ void Authentication::processAuthModuleResponse(AuthStatus &as) {
 	} else {
 		ev->reply(500, "Internal error", TAG_END());
 	}
+	delete &as;
 }
 
 const char *Authentication::findIncomingSubjectInTrusted(shared_ptr<RequestSipEvent> &ev, const char *fromDomain) {

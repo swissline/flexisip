@@ -63,12 +63,10 @@ private:
 
 	static ModuleInfo<Authentication> sInfo;
 	std::map<std::string, std::unique_ptr<FlexisipAuthModule>> mAuthModules;
-	std::map<std::unique_ptr<AuthStatus>, std::shared_ptr<RequestSipEvent>> mPendingAuths;
 	std::list<std::string> mDomains;
 	std::list<BinaryIp> mTrustedHosts;
 	std::list<std::string> mTrustedClientCertificates;
 	std::list<std::string> mAlgorithms;
-
 	regex_t mRequiredSubject;
 	auth_challenger_t mRegistrarChallenger;
 	auth_challenger_t mProxyChallenger;

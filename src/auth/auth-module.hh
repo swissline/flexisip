@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include <sofia-sip/auth_module.h>
 
 #include "auth-status.hh"
