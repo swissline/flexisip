@@ -18,42 +18,41 @@
 
 #pragma once
 
-#include <sofia-sip/nth.h>
-
 #include <array>
 
 #include "agent.hh"
+#include "auth/http-auth-module.hh"
 #include "module.hh"
-#include "utils/string-formater.hh"
 
 class ModuleCustomAuthentication : public Module {
 public:
-	ModuleCustomAuthentication(Agent *agent) : Module(agent) {}
+	ModuleCustomAuthentication(Agent *agent);
+	~ModuleCustomAuthentication() override = default;
 
 private:
+	class _AuthStatus : public HttpAuthModule::Status {
+	public:
+		_AuthStatus(const std::shared_ptr<RequestSipEvent> &event): HttpAuthModule::Status(), mEvent(event) {}
+
+		const std::shared_ptr<RequestSipEvent> &event() const {return mEvent;}
+
+	private:
+		std::shared_ptr<RequestSipEvent> mEvent;
+	};
+
 	void onDeclare(GenericStruct *mc) override;
 	void onLoad(const GenericStruct *root) override;
-	void onUnload() override;
 	void onRequest(std::shared_ptr<RequestSipEvent> &ev) override;
 	void onResponse(std::shared_ptr<ResponseSipEvent> &ev) override {}
 
-	void onHttpResponse(nth_client_t *request, const http_t *http);
+	HttpAuthModule *findAuthModule(const std::string name);
+	void processAuthModuleResponse(AuthStatus &as);
 
-	void addPendingEvent(nth_client_t *request, const std::shared_ptr<RequestSipEvent> &ev);
-	std::shared_ptr<RequestSipEvent> removePendingEvent(nth_client_t *request);
-
-	std::map<std::string, std::string> extractParameters(const MsgSip &msg) const;
-	std::map<std::string, std::string> splitCommaSeparatedKeyValuesList(const std::string &kvList) const;
-	std::map<std::string, std::string> parseHttpBody(const std::string &body) const;
-
-	static int onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http);
-	static std::string toString(const http_payload_t *httpPayload);
-	static bool validSipCode(int sipCode);
-
-	nth_engine_t *mEngine = nullptr;
-	StringFormater mUriFormater;
+	std::map<std::string, std::unique_ptr<HttpAuthModule>> mAuthModules;
+	std::list<std::string> mAlgorithms;
 	std::map<nth_client_t *, std::shared_ptr<RequestSipEvent>> mPendingEvent;
+	auth_challenger_t mRegistrarChallenger;
+	auth_challenger_t mProxyChallenger;
 
-	static std::array<int, 4> mValidSipCodes;
 	static ModuleInfo<ModuleCustomAuthentication> mModuleInfo;
 };

@@ -43,7 +43,7 @@ void HttpAuthModule::checkAuthHeader(FlexisipAuthStatus &as, msg_auth_t *credent
 		map<string, string> params = extractParameters(*credentials);
 		string uri = mUriFormater.format(params);
 
-		auto *ctx = new pair<HttpAuthModule &, FlexisipAuthStatus &>(*this, as);
+		auto *ctx = new HttpRequestCtx({*this, as});
 
 		nth_client_t *request = nth_client_tcreate(mEngine,
 			onHttpResponseCb,
@@ -59,8 +59,8 @@ void HttpAuthModule::checkAuthHeader(FlexisipAuthStatus &as, msg_auth_t *credent
 			delete ctx;
 			throw runtime_error(os.str());
 		}
-
 		SLOGD << "HTTP request [" << request << "] to '" << uri << "' successfully sent";
+		as.status(100);
 	} catch (const runtime_error &e) {
 		SLOGE << e.what();
 		onError(as);
@@ -147,7 +147,7 @@ void HttpAuthModule::onHttpResponse(FlexisipAuthStatus &as, nth_client_t *reques
 		}
 
 		auto &httpAuthStatus = dynamic_cast<HttpAuthModule::Status &>(as);
-		httpAuthStatus.status(sipCode);
+		httpAuthStatus.status(sipCode == 200 ? 0 : sipCode);
 		httpAuthStatus.phrase("");
 		httpAuthStatus.reason(reasonHeaderValue);
 	} catch (const runtime_error &e) {
@@ -185,16 +185,9 @@ std::map<std::string, std::string> HttpAuthModule::parseHttpBody(const std::stri
 	return result;
 }
 
-int HttpAuthModule::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) {
-	const char *defaultErrMsg = "unhandled exception in C callback";
-	auto *ctx = reinterpret_cast<pair<HttpAuthModule &, FlexisipAuthStatus &> *>(magic);
-	try {
-		ctx->first.onHttpResponse(ctx->second, request, http);
-	} catch (std::exception &e) {
-		SLOGE << defaultErrMsg << ": " << e.what();
-	} catch (...) {
-		SLOGE << defaultErrMsg;
-	}
+int HttpAuthModule::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) noexcept {
+	auto *ctx = reinterpret_cast<HttpRequestCtx *>(magic);
+	ctx->am.onHttpResponse(ctx->as, request, http);
 	delete ctx;
 	return 0;
 }

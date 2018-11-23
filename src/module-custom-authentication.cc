@@ -20,6 +20,10 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <sofia-sip/msg_addr.h>
+#include <sofia-sip/sip_extra.h>
+#include <sofia-sip/sip_status.h>
+
 #include "module-custom-authentication.hh"
 
 using namespace std;
@@ -32,23 +36,51 @@ std::ostream &operator<<(std::ostream &os, const http_payload_t *httpPayload) {
 	return os;
 }
 
+ModuleCustomAuthentication::ModuleCustomAuthentication(Agent *agent) : Module(agent) {
+	mProxyChallenger.ach_status = 407; /*SIP_407_PROXY_AUTH_REQUIRED*/
+	mProxyChallenger.ach_phrase = sip_407_Proxy_auth_required;
+	mProxyChallenger.ach_header = sip_proxy_authenticate_class;
+	mProxyChallenger.ach_info = sip_proxy_authentication_info_class;
+
+	mRegistrarChallenger.ach_status = 401; /*SIP_401_UNAUTHORIZED*/
+	mRegistrarChallenger.ach_phrase = sip_401_Unauthorized;
+	mRegistrarChallenger.ach_header = sip_www_authenticate_class;
+	mRegistrarChallenger.ach_info = sip_authentication_info_class;
+}
+
 void ModuleCustomAuthentication::onDeclare(GenericStruct *mc) {
 	ConfigItemDescriptor items[] = {
+		{ StringList, "auth-domains", "", "localhost" },
 		{ String, "remote-auth-uri", "", "" },
+		{ StringList, "available-algorithms", "", "MD5" },
+		{ Boolean, "disable-qop-auth", "", "false" },
+		{ Integer, "nonce-expires", "", "3600" },
 		config_item_end
 	};
 	mc->addChildrenValues(items);
 	mc->get<ConfigBoolean>("enabled")->setDefault("false");
 }
 
-void ModuleCustomAuthentication::onLoad(const GenericStruct *root) {
-	mEngine = nth_engine_create(mAgent->getRoot(), TAG_END());
-	mUriFormater.setTemplate(root->get<ConfigString>("remote-auth-uri")->read());
-}
+void ModuleCustomAuthentication::onLoad(const GenericStruct *mc) {
+	list<string> authDomains = mc->get<ConfigStringList>("auth-domains")->read();
 
-void ModuleCustomAuthentication::onUnload() {
-	nth_engine_destroy(mEngine);
-	mEngine = nullptr;
+	list<string> mAlgorithms = mc->get<ConfigStringList>("available-algorithms")->read();
+	if (mAlgorithms.empty()) mAlgorithms = {"MD5", "SHA-256"};
+	mAlgorithms.unique();
+
+	bool disableQOPAuth = mc->get<ConfigBoolean>("disable-qop-auth")->read();
+	int nonceExpires = mc->get<ConfigInt>("nonce-expires")->read();
+
+	for (const string &domain : authDomains) {
+		unique_ptr<HttpAuthModule> am;
+		if (disableQOPAuth) {
+			am.reset(new HttpAuthModule(getAgent()->getRoot(), domain, mAlgorithms.front()));
+		} else {
+			am.reset(new HttpAuthModule(getAgent()->getRoot(), domain, mAlgorithms.front(), nonceExpires));
+		}
+		am->getFormater().setTemplate(mc->get<ConfigString>("remote-auth-uri")->read());
+		mAuthModules[domain] = move(am);
+	}
 }
 
 void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev) {
@@ -65,200 +97,122 @@ void ModuleCustomAuthentication::onRequest(std::shared_ptr<RequestSipEvent> &ev)
 			return;
 		}
 
-		map<string, string> params = extractParameters(*ms);
-		string uri = mUriFormater.format(params);
-
-		nth_client_t *request = nth_client_tcreate(mEngine,
-			onHttpResponseCb,
-			reinterpret_cast<nth_client_magic_t *>(this),
-			http_method_get,
-			"GET",
-			URL_STRING_MAKE(uri.c_str()),
-			TAG_END()
-		);
-		if (request == nullptr) {
-			ostringstream os;
-			os << "HTTP request for '" << uri << "' has failed";
-			throw runtime_error(os.str());
+		sip_p_preferred_identity_t *ppi = nullptr;
+		const char *fromDomain = sip->sip_from->a_url[0].url_host;
+		if (fromDomain && strcmp(fromDomain, "anonymous.invalid") == 0) {
+			ppi = sip_p_preferred_identity(sip);
+			if (ppi)
+				fromDomain = ppi->ppid_url->url_host;
+			else
+				LOGD("There is no p-preferred-identity");
 		}
 
-		SLOGD << "HTTP request [" << request << "] to '" << uri << "' successfully sent";
-		addPendingEvent(request, ev);
-		ev->suspendProcessing();
+		HttpAuthModule *am = findAuthModule(fromDomain);
+		if (am == nullptr) {
+			SLOGI << "Unknown domain [" << fromDomain << "]";
+			SLOGUE << "Registration failure, domain is forbidden: " << fromDomain;
+			ev->reply(403, "Domain forbidden", SIPTAG_SERVER_STR(getAgent()->getServerString()), TAG_END());
+			return;
+		}
+
+		auto *as = new _AuthStatus(ev);
+		as->method(sip->sip_request->rq_method_name);
+		as->source(msg_addrinfo(ms->getMsg()));
+		as->userUri(ppi ? ppi->ppid_url : sip->sip_from->a_url);
+		as->realm(as->userUri()->url_host);
+		as->display(sip->sip_from->a_display);
+		if (sip->sip_payload) {
+			as->body(sip->sip_payload->pl_data);
+			as->bodyLen(sip->sip_payload->pl_len);
+		}
+		as->usedAlgo() = mAlgorithms;
+
+		if (sip->sip_request->rq_method == sip_method_register) {
+			am->verify(*as, sip->sip_authorization, &mRegistrarChallenger);
+		} else {
+			am->verify(*as, sip->sip_proxy_authorization, &mProxyChallenger);
+		}
+
+		processAuthModuleResponse(*as);
 	} catch (const runtime_error &e) {
 		SLOGE << e.what();
 		ev->reply(500, "Internal error", TAG_END());
 	}
 }
 
-void ModuleCustomAuthentication::onHttpResponse(nth_client_t *request, const http_t *http) {
-	shared_ptr<RequestSipEvent> ev;
-	try {
-		int sipCode = 0;
-		string reasonHeaderValue;
-		ostringstream os;
-
-		ev = removePendingEvent(request);
-
-		if (http == nullptr) {
-			os << "HTTP server responds with code " << nth_client_status(request);
-			throw runtime_error(os.str());
+HttpAuthModule *ModuleCustomAuthentication::findAuthModule(const std::string name) {
+	auto it = mAuthModules.find(name);
+	if (it == mAuthModules.end())
+		it = mAuthModules.find("*");
+	if (it == mAuthModules.end()) {
+		for (auto it2 = mAuthModules.begin(); it2 != mAuthModules.end(); ++it2) {
+			string domainName = it2->first;
+			size_t wildcardPosition = domainName.find("*");
+			// if domain has a wildcard in it, try to match
+			if (wildcardPosition != string::npos) {
+				size_t beforeWildcard = name.find(domainName.substr(0, wildcardPosition));
+				size_t afterWildcard = name.find(domainName.substr(wildcardPosition + 1));
+				if (beforeWildcard != string::npos && afterWildcard != string::npos) {
+					return it2->second.get();
+				}
+			}
 		}
+	}
+	if (it == mAuthModules.end()) {
+		return nullptr;
+	}
+	return it->second.get();
+}
 
-		int status = http->http_status->st_status;
-		SLOGD << "HTTP response received [" << status << "]: " << endl << http->http_payload;
-		if (status != 200) {
-			os << "unhandled HTTP status code [" << status << "]";
-			throw runtime_error(os.str());
-		}
-
-		string httpBody = toString(http->http_payload);
-		if (httpBody.empty()) {
-			os << "HTTP server answered with an empty body";
-			throw runtime_error(os.str());
-		}
-
-		try {
-			map<string, string> kv = parseHttpBody(httpBody);
-			sipCode = stoi(kv["Status"]);
-			reasonHeaderValue = move(kv["Reason"]);
-		} catch (const logic_error &e) {
-			os << "error while parsing HTTP body: " << e.what();
-			throw runtime_error(os.str());
-		}
-
-		if (!validSipCode(sipCode) || reasonHeaderValue.empty()) {
-			os << "invlaid SIP code or reason";
-			throw runtime_error(os.str());
-		}
-
-		if (sipCode == 200) {
-			getAgent()->injectRequestEvent(ev);
+void ModuleCustomAuthentication::processAuthModuleResponse(AuthStatus &as) {
+	const shared_ptr<RequestSipEvent> &ev = dynamic_cast<const _AuthStatus &>(as).event();
+	auto &authStatus = dynamic_cast<_AuthStatus &>(as);
+	if (as.status() == 0) {
+		const std::shared_ptr<MsgSip> &ms = ev->getMsgSip();
+		sip_t *sip = ms->getSip();
+		if (sip->sip_request->rq_method == sip_method_register) {
+			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(
+				ms->getHome(),
+				sip->sip_authorization,
+				as.realm()
+			);
+			if (au) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
 		} else {
-			ev->reply(sipCode, "", SIPTAG_REASON_STR(reasonHeaderValue.c_str()), TAG_END());
+			msg_auth_t *au = ModuleToolbox::findAuthorizationForRealm(
+				ms->getHome(),
+				sip->sip_proxy_authorization,
+				as.realm()
+			);
+			if (au->au_next) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au->au_next);
+			if (au) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
 		}
-	} catch (const runtime_error &e) {
-		SLOGE << "HTTP request [" << request << "]: " << e.what();
+		if (ev->isSuspended()) {
+			// The event is re-injected
+			getAgent()->injectRequestEvent(ev);
+		}
+	} else if (as.status() == 100) {
+		using std::placeholders::_1;
+		ev->suspendProcessing();
+		as.callback(std::bind(&ModuleCustomAuthentication::processAuthModuleResponse, this, _1));
+		return;
+	} else if (as.status() >= 400) {
+		if (as.status() == 401 || as.status() == 407) {
+			auto log = make_shared<AuthLog>(ev->getMsgSip()->getSip(), authStatus.passwordFound());
+			log->setStatusCode(as.status(), as.phrase());
+			log->setCompleted();
+			ev->setEventLog(log);
+		}
+		ev->reply(as.status(), as.phrase(),
+			SIPTAG_HEADER((const sip_header_t *)as.info()),
+			SIPTAG_HEADER((const sip_header_t *)as.response()),
+			SIPTAG_SERVER_STR(getAgent()->getServerString()),
+			TAG_END()
+		);
+	} else {
 		ev->reply(500, "Internal error", TAG_END());
 	}
+	delete &as;
 }
-
-void ModuleCustomAuthentication::addPendingEvent(nth_client_t *request, const std::shared_ptr<RequestSipEvent> &ev) {
-	shared_ptr<RequestSipEvent> &evRef = mPendingEvent[request];
-	if (evRef) {
-		ostringstream os;
-		os << request << " HTTP request is already pending";
-		mPendingEvent.erase(request);
-		throw logic_error(os.str());
-	}
-	evRef = ev;
-}
-
-std::shared_ptr<RequestSipEvent> ModuleCustomAuthentication::removePendingEvent(nth_client_t *request) {
-	auto it = mPendingEvent.find(request);
-	if (it == mPendingEvent.end()) {
-		ostringstream os;
-		os << "HTTP request (" << request << ") doesn't exist in pending requests list";
-		throw logic_error(os.str());
-	}
-	shared_ptr<RequestSipEvent> ev = it->second;
-	mPendingEvent.erase(it);
-	return ev;
-}
-
-std::map<std::string, std::string> ModuleCustomAuthentication::extractParameters(const MsgSip &msg) const {
-	map<string, string> params;
-	sip_auth_t *authHeader = msg.getSip()->sip_authorization ? msg.getSip()->sip_authorization : msg.getSip()->sip_proxy_authorization;
-	if (authHeader) {
-		try {
-			params = splitCommaSeparatedKeyValuesList(*authHeader->au_params);
-			params["scheme"] = authHeader->au_scheme;
-		} catch (const invalid_argument &e) { // thrown by splitCommaSeparatedKeyValuesList()
-			ostringstream os;
-			os << "failed to extract parameters from '" << *authHeader->au_params << "': " << e.what();
-			throw runtime_error(os.str());
-		}
-	}
-	return params;
-}
-
-std::map<std::string, std::string> ModuleCustomAuthentication::splitCommaSeparatedKeyValuesList(const std::string &kvList) const {
-	map<string, string> keyValues;
-	string::const_iterator keyPos = kvList.cbegin();
-	while (keyPos != kvList.cend()) {
-		auto commaPos = find(keyPos, kvList.cend(), ',');
-		auto eqPos = find(keyPos, commaPos, '=');
-		if (eqPos == commaPos) {
-			ostringstream os;
-			os << "invalid key-value: '" << string(keyPos, commaPos) << "'";
-			throw invalid_argument(os.str());
-		}
-		string key(keyPos, eqPos);
-		string value(eqPos+1, commaPos);
-		if (key.empty() || value.empty()) {
-			ostringstream os;
-			os << "empty key or value: '" << string(keyPos, commaPos) << "'";
-			throw invalid_argument(os.str());
-		}
-		keyValues[move(key)] = move(value);
-		keyPos = commaPos != kvList.cend() ? commaPos+1 : kvList.cend();
-	}
-	return keyValues;
-}
-
-std::map<std::string, std::string> ModuleCustomAuthentication::parseHttpBody(const std::string &body) const {
-	istringstream is(body);
-	ostringstream os;
-	map<string, string> result;
-	string line;
-
-	do {
-		getline(is, line);
-		if (line.empty()) continue;
-
-		auto column = find(line.cbegin(), line.cend(), ':');
-		if (column == line.cend()) {
-			os << "invalid line '" << line << "': missing column symbol";
-			throw invalid_argument(os.str());
-		}
-
-		string &value = result[string(line.cbegin(), column)];
-		auto valueStart = find_if_not(column+1, line.cend(), [](const char &c){return isspace(c) != 0;});
-		if (valueStart == line.cend()) {
-			os << "invalid line '" << line << "': missing value";
-			throw invalid_argument(os.str());
-		}
-
-		value.assign(valueStart, line.cend());
-	} while (!is.eof());
-	return result;
-}
-
-int ModuleCustomAuthentication::onHttpResponseCb(nth_client_magic_t *magic, nth_client_t *request, const http_t *http) {
-	const char *defaultErrMsg = "unhandled exception in C callback";
-	try {
-		reinterpret_cast<ModuleCustomAuthentication *>(magic)->onHttpResponse(request, http);
-	} catch (std::exception &e) {
-		SLOGE << defaultErrMsg << ": " << e.what();
-	} catch (...) {
-		SLOGE << defaultErrMsg;
-	}
-	return 0;
-}
-
-std::string ModuleCustomAuthentication::toString(const http_payload_t *httpPayload) {
-	if (httpPayload == nullptr || httpPayload->pl_data == nullptr || httpPayload->pl_len == 0) {
-		return string();
-	}
-	return string(httpPayload->pl_data, httpPayload->pl_len);
-}
-
-bool ModuleCustomAuthentication::validSipCode(int sipCode) {
-	const auto it = find(mValidSipCodes.cbegin(), mValidSipCodes.cend(), sipCode);
-	return (it != mValidSipCodes.cend());
-}
-
-std::array<int, 4> ModuleCustomAuthentication::mValidSipCodes = {200, 401, 407, 403};
 
 ModuleInfo<ModuleCustomAuthentication> ModuleCustomAuthentication::mModuleInfo(
 	"CustomAuthentication",

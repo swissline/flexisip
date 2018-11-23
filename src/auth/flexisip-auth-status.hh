@@ -39,7 +39,6 @@ public:
 
 private:
 	std::list<std::string> mAlgoUsed;
-	std::shared_ptr<RequestSipEvent> mEvent;
 	bool mNo403 = false;
 	bool mPasswordFound = false;
 };
