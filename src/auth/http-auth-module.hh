@@ -30,8 +30,12 @@ public:
 		const std::string &reason() const {return mReasonHeader;}
 		void reason(const std::string &val) {mReasonHeader = val;}
 
+		const std::string &pAssertedIdentity() const {return mPAssertedIdentity;}
+		void pAssertedIdentity(const std::string &val) {mPAssertedIdentity = val;}
+
 	private:
 		std::string mReasonHeader;
+		std::string mPAssertedIdentity;
 	};
 
 	HttpAuthModule(su_root_t *root, const std::string &domain, const std::string &algo);

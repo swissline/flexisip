@@ -112,6 +112,7 @@ void HttpAuthModule::onHttpResponse(FlexisipAuthStatus &as, nth_client_t *reques
 	try {
 		int sipCode = 0;
 		string reasonHeaderValue;
+		string pAssertedIdentity;
 		ostringstream os;
 
 		if (http == nullptr) {
@@ -136,6 +137,7 @@ void HttpAuthModule::onHttpResponse(FlexisipAuthStatus &as, nth_client_t *reques
 			map<string, string> kv = parseHttpBody(httpBody);
 			sipCode = stoi(kv["Status"]);
 			reasonHeaderValue = move(kv["Reason"]);
+			pAssertedIdentity = move(kv["P-Asserted-Identity"]);
 		} catch (const logic_error &e) {
 			os << "error while parsing HTTP body: " << e.what();
 			throw runtime_error(os.str());
@@ -150,6 +152,7 @@ void HttpAuthModule::onHttpResponse(FlexisipAuthStatus &as, nth_client_t *reques
 		httpAuthStatus.status(sipCode == 200 ? 0 : sipCode);
 		httpAuthStatus.phrase("");
 		httpAuthStatus.reason(reasonHeaderValue);
+		httpAuthStatus.pAssertedIdentity(pAssertedIdentity);
 	} catch (const runtime_error &e) {
 		SLOGE << "HTTP request [" << request << "]: " << e.what();
 		onError(as);

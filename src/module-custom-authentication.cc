@@ -186,6 +186,9 @@ void ModuleCustomAuthentication::processAuthModuleResponse(AuthStatus &as) {
 			if (au->au_next) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au->au_next);
 			if (au) msg_header_remove(ms->getMsg(), (msg_pub_t *)sip, (msg_header_t *)au);
 		}
+		if (!authStatus.pAssertedIdentity().empty()) {
+			msg_header_add_str(ms->getMsg(), reinterpret_cast<msg_pub_t *>(sip), authStatus.pAssertedIdentity().c_str());
+		}
 		if (ev->isSuspended()) {
 			// The event is re-injected
 			getAgent()->injectRequestEvent(ev);
@@ -205,6 +208,7 @@ void ModuleCustomAuthentication::processAuthModuleResponse(AuthStatus &as) {
 		ev->reply(as.status(), as.phrase(),
 			SIPTAG_HEADER((const sip_header_t *)as.info()),
 			SIPTAG_HEADER((const sip_header_t *)as.response()),
+			SIPTAG_REASON_STR(authStatus.reason().empty() ? nullptr : authStatus.reason().c_str()),
 			SIPTAG_SERVER_STR(getAgent()->getServerString()),
 			TAG_END()
 		);
