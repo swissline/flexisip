@@ -111,6 +111,7 @@ void HttpAuthModule::onHttpResponse(FlexisipAuthStatus &as, nth_client_t *reques
 	shared_ptr<RequestSipEvent> ev;
 	try {
 		int sipCode = 0;
+		string phrase;
 		string reasonHeaderValue;
 		string pAssertedIdentity;
 		ostringstream os;
@@ -136,6 +137,7 @@ void HttpAuthModule::onHttpResponse(FlexisipAuthStatus &as, nth_client_t *reques
 		try {
 			map<string, string> kv = parseHttpBody(httpBody);
 			sipCode = stoi(kv["Status"]);
+			phrase = move(kv["Phrase"]);
 			reasonHeaderValue = move(kv["Reason"]);
 			pAssertedIdentity = move(kv["P-Asserted-Identity"]);
 		} catch (const logic_error &e) {
@@ -150,7 +152,7 @@ void HttpAuthModule::onHttpResponse(FlexisipAuthStatus &as, nth_client_t *reques
 
 		auto &httpAuthStatus = dynamic_cast<HttpAuthModule::Status &>(as);
 		httpAuthStatus.status(sipCode == 200 ? 0 : sipCode);
-		httpAuthStatus.phrase("");
+		httpAuthStatus.phrase(su_strdup(as.home(), phrase.c_str()));
 		httpAuthStatus.reason(reasonHeaderValue);
 		httpAuthStatus.pAssertedIdentity(pAssertedIdentity);
 	} catch (const runtime_error &e) {
