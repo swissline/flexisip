@@ -16,8 +16,7 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __flexisip__presence_server__
-#define __flexisip__presence_server__
+#pragma once
 
 #include <iostream>
 #include <map>
@@ -68,8 +67,7 @@ public:
 
 class PresenceServer : public PresentityManager, public ServiceServer {
 public:
-	PresenceServer();
-	PresenceServer(bool withThread, su_root_t* root = nullptr);
+	PresenceServer(su_root_t* root);
 	~PresenceServer();
 	void _init() override;
 	void _run() override;
@@ -92,9 +90,9 @@ private:
 	std::string mBypass;
 	std::string mRequest;
 #if ENABLE_SOCI
-	soci::connection_pool *mConnPool;
+	soci::connection_pool *mConnPool = nullptr;
 #endif
-	ThreadPool *mThreadPool;
+	ThreadPool *mThreadPool = nullptr;
 	bool mEnabled;
 	size_t mMaxPresenceInfoNotifiedAtATime;
 
@@ -105,7 +103,6 @@ private:
 	static void processResponseEvent(PresenceServer * thiz, const belle_sip_response_event_t *event);
 	static void processTimeout(PresenceServer * thiz, const belle_sip_timeout_event_t *event) ;
 	static void processTransactionTerminated(PresenceServer * thiz, const belle_sip_transaction_terminated_event_t *event);
-	void _start(bool withThread);
 	void processPublishRequestEvent(const belle_sip_request_event_t *event);
 	void processSubscribeRequestEvent(const belle_sip_request_event_t *event);
 
@@ -146,4 +143,3 @@ private:
 };
 
 }
-#endif /* defined(__flexisip__presence_server__) */

@@ -16,23 +16,25 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "module.hh"
-#include "agent.hh"
-#include "event.hh"
-#include "transaction.hh"
+#include <flexisip/module.hh>
+#include <flexisip/agent.hh>
+#include <flexisip/event.hh>
+#include <flexisip/transaction.hh>
+
 #include "pushnotification/pushnotificationservice.hh"
 #include "pushnotification/applepush.hh"
 #include "pushnotification/genericpush.hh"
 #include "pushnotification/googlepush.hh"
 #include "pushnotification/microsoftpush.hh"
 #include "pushnotification/firebasepush.hh"
-#include "forkcallcontext.hh"
+#include <flexisip/forkcallcontext.hh>
 
 #include <map>
 #include <sofia-sip/msg_mime.h>
 #include <sofia-sip/sip_status.h>
 
 using namespace std;
+using namespace flexisip;
 
 class PushNotification;
 
@@ -45,6 +47,7 @@ private:
 	shared_ptr<ForkCallContext> mForkContext;
 	string mKey; // unique key for the push notification, identifiying the device and the call.
 	bool mSendRinging;
+	bool mPushSentResponseSent = false; // whether the 110 Push sent was sent already
 	void onTimeout();
 	void onError(const string &errormsg);
 	void onEnd();
@@ -157,8 +160,10 @@ void PushNotificationContext::onTimeout() {
 	}
 
 	mModule->getService()->sendPush(mPushNotificationRequest);
-	if (mForkContext)
+	if (mForkContext && !mPushSentResponseSent){
 		mForkContext->sendResponse(110, "Push sent");
+		mPushSentResponseSent = true;
+	}
 }
 
 void PushNotificationContext::clear() {
@@ -210,7 +215,8 @@ void PushNotification::onDeclare(GenericStruct *module_config) {
 	module_config->get<ConfigBoolean>("enabled")->setDefault("false");
 	ConfigItemDescriptor items[] = {
 		{Integer, "timeout",
-		 "Number of second to wait before sending a push notification to device(if <=0 then disabled)", "5"},
+		 "Number of seconds to wait before sending a push notification to device. A value lesser or equal to zero will make "
+		 "the push notification to be sent immediately.", "5"},
 		{Integer, "max-queue-size", "Maximum number of notifications queued for each client", "100"},
 		{Integer, "time-to-live", "Default time to live for the push notifications, in seconds. This parameter shall be set according to mDeliveryTimeout parameter in ForkContext.cc", "2592000"},
 		{Boolean, "apple", "Enable push notification for apple devices", "true"},
@@ -471,6 +477,7 @@ void PushNotification::makePushNotification(const shared_ptr<MsgSip> &ms,
 				pn = make_shared<GenericPushNotificationRequest>(pinfo, mExternalPushUri, mExternalPushMethod);
 
 			if (pn) {
+				if (time_out < 0) time_out = 0;
 				SLOGD << "Creating a push notif context PNR " << pn.get() << " to send in " << time_out << "s";
 				context = make_shared<PushNotificationContext>(transaction, this, pn, pnKey);
 				context->start(time_out, !pinfo.mSilent);

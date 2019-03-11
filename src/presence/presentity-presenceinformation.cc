@@ -24,12 +24,13 @@
 
 #include "data-model.hh"
 #include "etag-manager.hh"
-#include "log/logmanager.hh"
+#include <flexisip/logmanager.hh>
 #include "pidf+xml.hh"
 #include "presentity-manager.hh"
 #include "presentity-presenceinformation.hh"
 #include "rpid.hh"
-#include "utils/flexisip-exception.hh"
+#include <flexisip/flexisip-exception.hh>
+#include "utils/string-utils.hh"
 
 #define ETAG_SIZE 8
 using namespace std;
@@ -337,6 +338,15 @@ void PresentityPresenceInformation::removeListener(const shared_ptr<PresentityPr
 	listener->onInformationChanged(*this, listener->extendedNotifyEnabled());
 }
 
+void PresentityPresenceInformation::addCapability(const std::string &capability) {
+	if (mCapabilities.empty()) {
+		mCapabilities = capability;
+	} else if (mCapabilities.find(capability) == mCapabilities.npos) {
+		mCapabilities += ", " + capability;
+	}
+	notifyAll();
+}
+
 bool PresentityPresenceInformation::hasDefaultElement() {
 	return !!mDefaultInformationElement;
 }
@@ -350,13 +360,38 @@ string PresentityPresenceInformation::getPidf(bool extended) {
 		Xsd::Pidf::Presence presence((string(entity)));
 		belle_sip_free(entity);
 		list<string> tupleList;
-
 		if(extended) {
 			for (const auto &element : mInformationElements) {
 				// copy pidf
 				for (const unique_ptr<Xsd::Pidf::Tuple> &tup : element.second->getTuples()) {
 					// check for multiple tupple id, may happend with buggy presence publisher
 					if (find(tupleList.begin(), tupleList.end(), tup.get()->getId()) == tupleList.end()) {
+						auto predicate = [](char c){ return ::isspace(c) || c == '"'; };
+						mCapabilities.erase(remove_if(mCapabilities.begin(), mCapabilities.end(), predicate), mCapabilities.end());
+						vector<string> capabilityVector = StringUtils::split(mCapabilities, ",");
+						bool addService = false;
+						for (const auto &capability : capabilityVector) {
+							if (capability.empty()) continue;
+
+							size_t pos = capability.find("/");
+							const string &capabilityName = (pos == string::npos) ? capability : capability.substr(0, pos);
+							const string &capabilityVersion = (pos == string::npos) ? "1.0" : capability.substr(pos + 1);
+							const auto &it = mAddedCapabilities.find(capabilityName);
+							if(it != mAddedCapabilities.cend()) {
+								if (std::stof(it->second) >= std::stof(capabilityVersion))
+									continue;
+
+								mAddedCapabilities.erase(it);
+							}
+							addService = true;
+							mAddedCapabilities.insert(make_pair(capabilityName, capabilityVersion));
+						}
+						if (addService) {
+							for (const auto &cap : mAddedCapabilities) {
+								Xsd::Pidf::Tuple::ServiceDescriptionType service(cap.first, cap.second);
+								tup->getServiceDescription().push_back(service);
+							}
+						}
 						presence.getTuple().push_back(*tup);
 						tupleList.push_back(tup.get()->getId());
 					} else {
@@ -376,7 +411,39 @@ string PresentityPresenceInformation::getPidf(bool extended) {
 		}
 		if ((mInformationElements.size() == 0 || !extended) && mDefaultInformationElement) {
 			// insering default tuple
-			presence.getTuple().push_back(*mDefaultInformationElement->getTuples().begin()->get());
+			Xsd::Pidf::Tuple *tup = mDefaultInformationElement->getTuples().begin()->get();
+			auto predicate = [](char c){ return ::isspace(c) || c == '"'; };
+			mCapabilities.erase(remove_if(mCapabilities.begin(), mCapabilities.end(), predicate), mCapabilities.end());
+			vector<string> capabilityVector = StringUtils::split(mCapabilities, ",");
+			bool addService = false;
+			for (const auto &capability : capabilityVector) {
+				if (capability.empty()) continue;
+
+				size_t pos = capability.find("/");
+				const string &capabilityName = (pos == string::npos) ? capability : capability.substr(0, pos);
+				const string &capabilityVersion = (pos == string::npos) ? "1.0" : capability.substr(pos + 1);
+				const auto &it = mAddedCapabilities.find(capabilityName);
+				if(it != mAddedCapabilities.cend()) {
+					if (std::stof(it->second) >= std::stof(capabilityVersion))
+						continue;
+
+					mAddedCapabilities.erase(it);
+				}
+				addService = true;
+				mAddedCapabilities.insert(make_pair(capabilityName, capabilityVersion));
+			}
+			if (addService) {
+				for (const auto &cap : mAddedCapabilities) {
+					Xsd::Pidf::Tuple::ServiceDescriptionType service(cap.first, cap.second);
+					auto predicate= [cap](Xsd::Pidf::Tuple::ServiceDescriptionType serviceDescription) {
+						return (cap.first == serviceDescription.getServiceId()) && (cap.second == serviceDescription.getVersion());
+					};
+					const auto &it = std::find_if(tup->getServiceDescription().begin(), tup->getServiceDescription().end(), predicate);
+					if (it == tup->getServiceDescription().end())
+						tup->getServiceDescription().push_back(service);
+				}
+			}
+			presence.getTuple().push_back(*tup);
 
 			// copy extensions
 			Xsd::DataModel::Person dm_person = mDefaultInformationElement->getPerson();

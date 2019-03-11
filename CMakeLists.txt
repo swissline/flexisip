@@ -52,6 +52,7 @@ option(ENABLE_SOCI "Build with SOCI support" YES)
 option(ENABLE_STATIC "Build static library (default is shared library)." NO)
 option(ENABLE_TRANSCODER "Build transcoder support" YES)
 option(ENABLE_MDNS "Build multicast DNS support" NO)
+option(ENABLE_EXTERNAL_AUTH_PLUGIN "Enable ExternalAuth plugin support" NO)
 option(ENABLE_JWE_AUTH_PLUGIN "Enable JweAuth plugin support" NO)
 
 cmake_dependent_option(ENABLE_SPECIFIC_FEATURES "Enable mediarelay specific features" OFF "ENABLE_TRANSCODER" OFF)
@@ -227,12 +228,13 @@ find_package(OpenSSL 0.9.8 REQUIRED)
 feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)
 
 include_directories(
+	include/
+	src/
+	src/plugin
 	${CMAKE_CURRENT_BINARY_DIR}
 	${CMAKE_CURRENT_BINARY_DIR}/src/
 	${ORTP_INCLUDE_DIRS}
 	${SOFIASIPUA_INCLUDE_DIRS}
-	src/
-	src/plugin
 )
 
 set(BELR_GRAMMARS_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/belr/grammars")
@@ -243,6 +245,7 @@ add_definitions("-DHAVE_CONFIG_H")
 
 bc_init_compilation_flags(CPP_BUILD_FLAGS C_BUILD_FLAGS CXX_BUILD_FLAGS ENABLE_STRICT)
 
+add_subdirectory(include)
 add_subdirectory(src)
 add_subdirectory(scripts)
 add_subdirectory(share)

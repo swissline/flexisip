@@ -22,10 +22,9 @@
 
 #include "conference-address-generator.hh"
 #include "conference-server.hh"
-#include "participant-capabilities-check.hh"
-#include "participant-devices-search.hh"
 
-#include "configmanager.hh"
+
+#include <flexisip/configmanager.hh>
 
 using namespace flexisip;
 using namespace std;
@@ -34,14 +33,10 @@ using namespace std;
 SofiaAutoHome ConferenceServer::mHome;
 ConferenceServer::Init ConferenceServer::sStaticInit;
 
-
-ConferenceServer::ConferenceServer () : ServiceServer() {}
-
 ConferenceServer::ConferenceServer (
-	bool withThread,
 	const string &path,
 	su_root_t *root
-) : ServiceServer(withThread, root), mPath(path) {}
+) : ServiceServer(root), mPath(path), mSubscriptionHandler(*this) {}
 
 ConferenceServer::~ConferenceServer () {}
 
@@ -70,6 +65,7 @@ void ConferenceServer::_init () {
 			LOGF("ConferenceServer: Your configured conference transport(\"%s\") is not an URI.\nIf you have \"<>\" in your transport, remove them.", mTransport.c_str());
 		}
 	}
+	mCheckCapabilities = config->get<ConfigBoolean>("check-capabilities")->read();
 
 	// Core
 	shared_ptr<linphone::Config> configLinphone = linphone::Factory::get()->createConfig("");
@@ -103,10 +99,10 @@ void ConferenceServer::_init () {
 
 void ConferenceServer::_run () {
 	mCore->iterate();
-	if (mWithThread) bctbx_sleep_ms(10);
 }
 
 void ConferenceServer::_stop () {
+	mCore->removeListener(shared_from_this());
 	RegistrarDb::get()->removeStateListener(shared_from_this());
 }
 
@@ -145,27 +141,6 @@ void ConferenceServer::onConferenceAddressGeneration (const shared_ptr<linphone:
 	generator->run();
 }
 
-void ConferenceServer::onParticipantDeviceFetchRequested (
-	const shared_ptr<linphone::ChatRoom> & cr,
-	const shared_ptr<const linphone::Address> & participantAddr
-) {
-	shared_ptr<ParticipantDevicesSearch> search = make_shared<ParticipantDevicesSearch>(cr, participantAddr);
-	search->run();
-}
-
-void ConferenceServer::onParticipantsCapabilitiesChecked (
-	const shared_ptr<linphone::ChatRoom> & cr,
-	const shared_ptr<const linphone::Address> &deviceAddr,
-	const list<shared_ptr<linphone::Address> > & participantsAddr
-) {
-	shared_ptr<ParticipantCapabilitiesCheck> check = make_shared<ParticipantCapabilitiesCheck>(
-		cr,
-		deviceAddr,
-		participantsAddr
-	);
-	check->run();
-}
-
 void flexisip::ConferenceServer::onParticipantRegistrationSubscriptionRequested (
 	const shared_ptr<linphone::ChatRoom> &cr,
 	const shared_ptr<const linphone::Address> &participantAddr
@@ -197,10 +172,10 @@ void flexisip::ConferenceServer::bindAddresses () {
 
 void flexisip::ConferenceServer::bindConference() {
 	class FakeListener : public ContactUpdateListener {
-		void onRecordFound(Record *r) {}
-		void onError() {}
-		void onInvalid() {}
-		void onContactUpdated(const shared_ptr<ExtendedContact> &ec) {
+		void onRecordFound(const std::shared_ptr<Record> &r) override{}
+		void onError()override {}
+		void onInvalid()override {}
+		void onContactUpdated(const shared_ptr<ExtendedContact> &ec)override {
 			SLOGD << "ConferenceServer: ExtendedContact contactId=" << ec->contactId() << " callId=" << ec->callId();
 		}
 	};
@@ -238,7 +213,7 @@ void ConferenceServer::bindChatRoom (
 
 	sip_contact_t* sipContact = sip_contact_create(mHome.home(),
 		reinterpret_cast<const url_string_t*>(url_make(mHome.home(), contact.c_str())),
-		su_strdup(mHome.home(), ("+sip.instance=\"<" + gruu + ">\"").c_str()));
+		su_strdup(mHome.home(), ("+sip.instance=\"<" + gruu + ">\"").c_str()), nullptr);
 	url_t *from = url_make(mHome.home(), bindingUrl.c_str());
 	url_param_add(mHome.home(), from, ("gr=" + gruu).c_str());
 
@@ -262,7 +237,7 @@ ConferenceServer::Init::Init() {
 		{
 			Boolean,
 			"enabled",
-			"Enable conference server",
+			"Enable conference server", /* Do we need this ? The systemd enablement should be sufficient. */
 			"true"
 		},
 		{
@@ -274,13 +249,13 @@ ConferenceServer::Init::Init() {
 		{
 			String,
 			"conference-factory-uri",
-			"uri where the client must ask to create a conference.",
-			"sip:conference-factory@sip1.linphone.org"
+			"uri where the client must ask to create a conference. For example: 'sip:conference-factory@sip.linphone.org'.",
+			""
 		},
 		{
 			Boolean,
 			"enable-one-to-one-chat-room",
-			"Whether one-to-one chat room creation is allowed or not",
+			"Whether one-to-one chat room creation is allowed or not.",
 			"true"
 		},
 		{
@@ -308,10 +283,23 @@ ConferenceServer::Init::Init() {
 			"http://soci.sourceforge.net/doc/3.2/backends/sqlite3.html",
 			"db='mydb' user='myuser' password='mypass' host='myhost.com'"
 		},
+		{
+			Boolean,
+			"check-capabilities",
+			"Whether the conference server shall check device capabilities before inviting them to a session.\n"
+			"The capability check is currently limited to Linphone client that put a +org.linphone.specs contact parameter"
+			" in order to indicate whether they support group chat and secured group chat.",
+			"true"
+		},
 		config_item_end
 	};
 
-	GenericStruct *s = new GenericStruct("conference-server", "Flexisip conference server parameters.", 0);
+	GenericStruct *s = new GenericStruct("conference-server", "Flexisip conference server parameters. "
+		"The flexisip conference server is a user-agent that handles session-based chat (yes, text only at this time). "
+		"It requires a mysql database in order to persisently store chatroom state (participants and their devices). "
+		"It will use the Registrar backend (see section module::Registrar) to discover devices (or client instances) "
+		"of each participant."
+	, 0);
 	GenericManager::get()->getRoot()->addChild(s);
 	s->addChildrenValues(items);
 }

@@ -21,9 +21,9 @@
 #include <iostream>
 
 #include "lpconfig.h"
-#include "configmanager.hh"
-#include "common.hh"
-#include "log/logmanager.hh"
+#include <flexisip/configmanager.hh>
+#include <flexisip/common.hh>
+#include <flexisip/logmanager.hh>
 #include "configdumper.hh"
 
 #include <functional>
@@ -50,7 +50,7 @@ bool ConfigValueListener::onConfigStateChanged(const ConfigValue &conf, ConfigSt
 				ofstream cfgfile;
 				cfgfile.open(GenericManager::get()->getConfigFile());
 				FileConfigDumper dumper(rootStruct);
-				dumper.setDumpDefaultValues(false);
+				dumper.setMode(FileConfigDumper::Mode::CurrentValue);
 				cfgfile << dumper;
 				cfgfile.close();
 				LOGI("New configuration wrote to %s .", GenericManager::get()->getConfigFile().c_str());
@@ -254,12 +254,16 @@ ConfigValue::ConfigValue(const string &name, GenericValueType vt, const string &
 }
 
 void ConfigValue::set(const string &value) {
+	set(string(value));
+}
+
+void ConfigValue::set(std::string &&value) {
 	if (getType() == Boolean) {
 		if (value != "true" && value != "false" && value != "1" && value != "0") {
 			LOGF("Not a boolean: \"%s\" for key \"%s\" ", value.c_str(), getName().c_str());
 		}
 	}
-	mValue = value;
+	mValue = move(value);
 }
 
 void ConfigValue::setNextValue(const string &value) {
@@ -914,7 +918,7 @@ GenericManager::GenericManager()
 			"16-sized hexadecimal number. If empty, it will be randomly generated at each start of Flexisip.", ""},
 		{Boolean, "use-maddr", "Allow flexisip to use maddr in sips connections to verify the CN of the TLS certificate.", "false"},
 		{Boolean, "debug", "Outputs very detailed logs.", "false"},
-		{String, "plugins-dir", "Path to the directory where plugins can be found.", "/usr/lib/flexisip/plugins/"},
+		{String, "plugins-dir", "Path to the directory where plugins can be found.", DEFAULT_PLUGINS_DIR},
 		{StringList, "plugins", "Plugins to use.", ""},
 		config_item_end};
 

@@ -27,10 +27,12 @@
 #include <poll.h>
 
 #include "cli.hh"
-#include "common.hh"
-#include "log/logmanager.hh"
-#include "registrardb.hh"
+#include <flexisip/common.hh>
+#include <flexisip/logmanager.hh>
+#include <flexisip/registrardb.hh>
 
+using namespace flexisip;
+using namespace std;
 
 CommandLineInterface::CommandLineInterface(const std::string &name) : mName(name) {
 	if (pipe(mControlFds) == -1)
@@ -320,7 +322,7 @@ void ProxyCommandLineInterface::handle_registrar_clear_command(unsigned int sock
 		ClearListener(ProxyCommandLineInterface *cli, unsigned int socket, const std::string &uri)
 			: mCli(cli), mSocket(socket), mUri(uri) {}
 
-		void onRecordFound(Record *r) override {
+		void onRecordFound(const shared_ptr<Record> &r) override {
 			RegistrarDb::get()->publish(mUri, "");
 			mCli->answer(mSocket, "Done: cleared record " + mUri);
 		}

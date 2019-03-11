@@ -16,12 +16,11 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef SIGNALING_EXCEPTION_HH_
-#define SIGNALING_EXCEPTION_HH_
+#pragma once
 
-#include "flexisip-exception.hh"
-#include <string.h>
+#include <flexisip/flexisip-exception.hh>
 
+namespace flexisip {
 
 /**
  * @brief This exception inherits \ref FlexisipException and allows a SIP error code to be carried along.
@@ -51,4 +50,4 @@ class SignalingException : public FlexisipException {
 
 #define SIGNALING_EXCEPTION(code) SignalingException(code) << " " << __FILE__ << ":" << __LINE__ << " "
 
-#endif /* SIGNALING_EXCEPTION_HH_ */
+}

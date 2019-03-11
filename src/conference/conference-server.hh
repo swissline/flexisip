@@ -16,16 +16,16 @@
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __flexisip__conference_server__
-#define __flexisip__conference_server__
+#pragma once
 
 #include <memory>
 
 #include <linphone++/linphone.hh>
 
-#include "registrardb.hh"
+#include <flexisip/registrardb.hh>
 #include "service-server.hh"
 
+#include "registration-subscription.hh"
 #include "participant-registration-subscription-handler.hh"
 
 
@@ -39,8 +39,7 @@ namespace flexisip {
 		, public linphone::ChatRoomListener
 	{
 	public:
-		ConferenceServer ();
-		ConferenceServer (bool withThread, const std::string &path, su_root_t *root = nullptr);
+		ConferenceServer (const std::string &path, su_root_t *root);
 		~ConferenceServer ();
 
 		void bindAddresses ();
@@ -56,6 +55,10 @@ namespace flexisip {
 		 * Bind conference on the registrardb
 		**/
 		void bindConference ();
+		
+		bool capabilityCheckEnabled()const{
+			return mCheckCapabilities;
+		}
 
 	protected:
 		void _init () override;
@@ -75,15 +78,7 @@ namespace flexisip {
 
 		// ChatRoomListener implementation
 		void onConferenceAddressGeneration (const std::shared_ptr<linphone::ChatRoom> &cr) override;
-		void onParticipantDeviceFetchRequested (
-			const std::shared_ptr<linphone::ChatRoom> &cr,
-			const std::shared_ptr<const linphone::Address> & participantAddr
-		) override;
-		void onParticipantsCapabilitiesChecked (
-			const std::shared_ptr<linphone::ChatRoom> &cr,
-			const std::shared_ptr<const linphone::Address> &deviceAddr,
-			const std::list<std::shared_ptr<linphone::Address> > & participantsAddr
-		) override;
+
 		void onParticipantRegistrationSubscriptionRequested (
 			const std::shared_ptr<linphone::ChatRoom> &cr,
 			const std::shared_ptr<const linphone::Address> & participantAddr
@@ -96,9 +91,11 @@ namespace flexisip {
 		std::shared_ptr<linphone::Core> mCore;
 		std::string mPath;
 		std::string mTransport;
-		bool mAddressesBound = false;
 		std::list<std::shared_ptr<linphone::ChatRoom>> mChatRooms;
 		ParticipantRegistrationSubscriptionHandler mSubscriptionHandler;
+		bool mAddressesBound = false;
+		bool mCheckCapabilities;
+		
 
 		// Used to declare the service configuration
 		class Init {
@@ -109,5 +106,3 @@ namespace flexisip {
 		static SofiaAutoHome mHome;
 	};
 } // namespace flexisip
-
-#endif //__flexisip__conference_server__

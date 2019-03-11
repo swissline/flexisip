@@ -20,14 +20,11 @@
 #include "bctoolbox/crypto.h"
 
 using namespace std;
+using namespace flexisip;
 
-AuthDbBackend *AuthDbBackend::sUnique = NULL;
+unique_ptr<AuthDbBackend> AuthDbBackend::sUnique;
 
 AuthDbListener::~AuthDbListener(){
-}
-
-void AuthDbListener::onResults(const list<string> &phones, const set<pair<string, string>> &presences) {
-
 }
 
 class FixedAuthDb : public AuthDbBackend {
@@ -45,27 +42,27 @@ public:
 	static void declareConfig(GenericStruct *mc){};
 };
 
-AuthDbBackend *AuthDbBackend::get() {
-	if (sUnique == NULL) {
+AuthDbBackend &AuthDbBackend::get() {
+	if (sUnique == nullptr) {
 		GenericStruct *cr = GenericManager::get()->getRoot();
 		GenericStruct *ma = cr->get<GenericStruct>("module::Authentication");
 		const string &impl = ma->get<ConfigString>("db-implementation")->read();
 		if (impl == "fixed") {
-			sUnique = new FixedAuthDb();
+			sUnique.reset(new FixedAuthDb());
 		} else if (impl == "file") {
-			sUnique = new FileAuthDb();
+			sUnique.reset(new FileAuthDb());
 #if ENABLE_ODBC
 		} else if (impl == "odbc") {
-			sUnique = new OdbcAuthDb();
+			sUnique.reset(new OdbcAuthDb());
 #endif
 #if ENABLE_SOCI
 		} else if (impl == "soci") {
-			sUnique = new SociAuthDB();
+			sUnique.reset(new SociAuthDB());
 #endif
 		}
 	}
 
-	return sUnique;
+	return *sUnique;
 }
 
 AuthDbBackend::AuthDbBackend() {
@@ -287,7 +284,7 @@ void AuthDbBackend::getUserWithPhone(const string & phone, const string & domain
 	getUserWithPhoneFromBackend(phone, domain, listener);
 }
 
-void AuthDbBackend::getUsersWithPhone(list<tuple<string,string,AuthDbListener*>> & creds, AuthDbListener *listener) {
+void AuthDbBackend::getUsersWithPhone(list<tuple<string,string,AuthDbListener*>> & creds) {
 	list<tuple<string,string,AuthDbListener*>> needed_creds;
 	for (tuple<string,string,AuthDbListener*> cred : creds) {
 		// Check for usable cached password
@@ -307,10 +304,10 @@ void AuthDbBackend::getUsersWithPhone(list<tuple<string,string,AuthDbListener*>>
 	}
 
 	// if we reach here, password wasn't cached: we have to grab the password from the actual backend
-	getUsersWithPhonesFromBackend(needed_creds, listener);
+	getUsersWithPhonesFromBackend(needed_creds);
 }
 
-void AuthDbBackend::getUsersWithPhonesFromBackend(list<tuple<string,string,AuthDbListener*>> &creds, AuthDbListener *listener) {
+void AuthDbBackend::getUsersWithPhonesFromBackend(list<tuple<string,string,AuthDbListener*>> &creds) {
 	for(tuple<string,string,AuthDbListener*> cred : creds) {
 		string phone = std::get<0>(cred);
 		string domain = std::get<1>(cred);

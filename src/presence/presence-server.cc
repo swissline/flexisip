@@ -25,7 +25,7 @@
 	#include "soci/mysql/soci-mysql.h"
 #endif
 
-#include "configmanager.hh"
+#include <flexisip/configmanager.hh>
 #include "bellesip-signaling-exception.hh"
 #include "list-subscription/body-list-subscription.hh"
 #if ENABLE_SOCI
@@ -35,6 +35,7 @@
 #include "presence-server.hh"
 #include "presentity-presenceinformation.hh"
 #include "resource-lists.hh"
+#include <flexisip/registrardb.hh>
 #include "subscription.hh"
 
 using namespace flexisip;
@@ -65,18 +66,15 @@ PresenceServer::Init::Init() {
 											"-':to' : the uri of the users list the sender want to subscribe to.\n"
 										"The use of the :from & :to parameters are mandatory.\n", ""},
 									{String, "soci-connection-string", "Connection string to SOCI.", ""},
-									{Integer, "max-thread", "Max number threads.", "200"},
-									{Integer, "max-thread-queue-size", "Max legnth of threads queue.", "200"},
+									{Integer, "max-thread", "Max number threads.", "50"},
+									{Integer, "max-thread-queue-size", "Max legnth of threads queue.", "50"},
 									config_item_end};
 	GenericStruct *s = new GenericStruct("presence-server", "Flexisip presence server parameters.", 0);
 	GenericManager::get()->getRoot()->addChild(s);
 	s->addChildrenValues(items);
 }
 
-PresenceServer::PresenceServer() : PresenceServer(false) {
-}
-
-PresenceServer::PresenceServer(bool withThread, su_root_t* root) : ServiceServer(withThread, root){
+PresenceServer::PresenceServer(su_root_t* root) : ServiceServer( root){
 	auto config = GenericManager::get()->getRoot()->get<GenericStruct>("presence-server");
 	/*Enabling leak detector should be done asap.*/
 	belle_sip_object_enable_leak_detector(GenericManager::get()->getRoot()->get<GenericStruct>("presence-server")->get<ConfigBoolean>("leak-detector")->read());
@@ -114,6 +112,8 @@ PresenceServer::PresenceServer(bool withThread, su_root_t* root) : ServiceServer
 	mEnabled = config->get<ConfigBoolean>("enabled")->read();
 	mRequest = config->get<ConfigString>("external-list-subscription-request")->read();
 
+	if (mRequest.empty()) return;
+
 	int maxThreads = config->get<ConfigInt>("max-thread")->read();
 	int maxQueueSize = config->get<ConfigInt>("max-thread-queue-size")->read();
 	const string &connectionString = config->get<ConfigString>("soci-connection-string")->read();
@@ -145,7 +145,6 @@ PresenceServer::~PresenceServer(){
 	belle_sip_list_for_each2 (tmp_list,(void (*)(void*,void*))remove_listening_point,mProvider);
 	belle_sip_list_free(tmp_list);
 
-	stop();
 	belle_sip_object_unref(mProvider);
 	belle_sip_object_unref(mStack);
 	belle_sip_object_unref(mListener);
@@ -162,9 +161,9 @@ PresenceServer::~PresenceServer(){
 	belle_sip_object_dump_active_objects();
 	belle_sip_object_flush_active_objects();
 
-	delete mThreadPool; // will automatically shut it down, clearing threads
+	if (mThreadPool) delete mThreadPool; // will automatically shut it down, clearing threads
 #if ENABLE_SOCI
-	delete mConnPool;
+	if (mConnPool) delete mConnPool;
 #endif
 	SLOGD << "Presence server destroyed";
 }
@@ -199,12 +198,10 @@ void PresenceServer::_init() {
 }
 
 void PresenceServer::_run() {
-	belle_sip_main_loop_run(belle_sip_stack_get_main_loop(mStack));
+	belle_sip_main_loop_sleep(belle_sip_stack_get_main_loop(mStack), 0);
 }
 
-void PresenceServer::_stop() {
-	belle_sip_main_loop_quit(belle_sip_stack_get_main_loop(mStack));
-}
+void PresenceServer::_stop() {}
 
 
 void PresenceServer::processDialogTerminated(PresenceServer *thiz, const belle_sip_dialog_terminated_event_t *event) {
@@ -273,13 +270,14 @@ void PresenceServer::processTimeout(PresenceServer *thiz, const belle_sip_timeou
 }
 void PresenceServer::processTransactionTerminated(PresenceServer *thiz, const belle_sip_transaction_terminated_event_t *event) {
 	belle_sip_client_transaction_t *client = belle_sip_transaction_terminated_event_get_client_transaction(event);
-	if(!client)
-		return;
+	if(!client) return;
 
-	Subscription *sub = (Subscription *)belle_sip_transaction_get_application_data(BELLE_SIP_TRANSACTION(client));
+	auto *sub = static_cast<Subscription *>(belle_sip_transaction_get_application_data(BELLE_SIP_TRANSACTION(client)));
 	if (sub) {
+		// WARNING: the next line MUST be placed before sub->mTransactionRef.reset() since
+		// the latter could delete 'sub' object.
+		sub->mCurrentTransaction = nullptr;
 		sub->mTransactionRef.reset();
-		sub->mCurrentTransaction = NULL;
 	}
 }
 
@@ -668,6 +666,11 @@ void PresenceServer::processSubscribeRequestEvent(const belle_sip_request_event_
 				};
 				if (!contentType) { // case of rfc4662 (list subscription without resource list in body)
 #if ENABLE_SOCI
+					if (!mThreadPool || !mConnPool) {
+						SLOGE << "Can't answer a bodyless subscription: no pool available.";
+						goto error;
+					}
+
 					listSubscription = make_shared<ExternalListSubscription>(
 						expires,
 						server_transaction,
@@ -695,9 +698,7 @@ void PresenceServer::processSubscribeRequestEvent(const belle_sip_request_event_
 						listAvailableLambda
 					);
 				} else { // Unsuported
-#if !ENABLE_SOCI
 error:
-#endif
 					belle_sip_object_unref(resp);
 					throw BELLESIP_SIGNALING_EXCEPTION_1(415, belle_sip_header_create("Accept", "application/resource-lists+xml")) << "Unsupported media type ["
 						<< (contentType ? belle_sip_header_content_type_get_type(contentType) : "not set") << "/"

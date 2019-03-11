@@ -17,9 +17,10 @@
 */
 
 #include "configdumper.hh"
-#include "module.hh"
+#include <flexisip/module.hh>
 
 using namespace std;
+using namespace flexisip;
 
 ostream &ConfigDumper::dump(ostream &ostr) const {
 	return dump_recursive(ostr, mRoot, 0);
@@ -79,18 +80,16 @@ bool ConfigDumper::shouldDumpModule(const string &moduleName) const {
 /* FILE CONFIG DUMPER */
 
 ostream &FileConfigDumper::printHelp(ostream &os, const string &help, const string &comment_prefix) const {
-	const char *p = help.c_str();
-	const char *begin = p;
-	const char *origin = help.c_str();
+	auto it = help.cbegin();
+	auto begin = it;
 
-	for (; *p != 0; ++p) {
-		if ((p - begin > 60 && *p == ' ') || *p == '\n') {
-			os << comment_prefix << " " << help.substr(begin - origin, p - begin) << endl;
-			p++;
-			begin = p;
+	for (; it != help.cend(); it++) {
+		if (((it - begin) > 60 && *it == ' ') || *it == '\n') {
+			os << comment_prefix << " " << string(begin, it) << endl;
+			begin = it + 1;
 		}
 	}
-	os << comment_prefix << " " << help.substr(begin - origin, p - origin) << endl;
+	os << comment_prefix << " " << string(begin, it) << endl;
 	return os;
 }
 
@@ -102,7 +101,7 @@ ostream &FileConfigDumper::dumpModuleValue(std::ostream &ostr, const ConfigValue
 		printHelp(ostr, val->getHelp(), "#");
 		ostr << "#  Default value: " << val->getDefault() << endl;
 
-		if (mDumpDefault) {
+		if (mDumpMode == Mode::DefaultValue || (mDumpMode == Mode::DefaultIfUnset && val->get().empty())) {
 			ostr << val->getName() << "=" << val->getDefault() << endl;
 		} else {
 			ostr << val->getName() << "=" << val->get() << endl;

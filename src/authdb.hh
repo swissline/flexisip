@@ -16,14 +16,13 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef _AUTHDB_HH_
-#define _AUTHDB_HH_
+#pragma once
 
 #include <string>
 #include <mutex>
 
-#include "common.hh"
-#include "agent.hh"
+#include <flexisip/common.hh>
+#include <flexisip/agent.hh>
 
 #include <vector>
 #include <stdio.h>
@@ -43,6 +42,8 @@
 #include "belr/grammarbuilder.h"
 #include "belr/parser.h"
 
+namespace flexisip {
+
 enum AuthDbResult { PENDING, PASSWORD_FOUND, PASSWORD_NOT_FOUND, AUTH_ERROR };
 
 struct passwd_algo_t {
@@ -57,13 +58,12 @@ class AuthDbListener : public StatFinishListener {
 public:
 	virtual void onResult(AuthDbResult result, const std::string &passwd) = 0;
 	virtual void onResult(AuthDbResult result, const std::vector<passwd_algo_t> &passwd)=0;
-	virtual void onResults(const std::list<std::string> &phones, const std::set<std::pair<std::string, std::string>> &presences);
 	virtual void finishVerifyAlgos(const std::vector<passwd_algo_t> &pass)=0;
 	virtual ~AuthDbListener();
 };
 
 class AuthDbBackend {
-	static AuthDbBackend *sUnique;
+	static std::unique_ptr<AuthDbBackend> sUnique;
 
 	struct CachedPassword {
 		std::vector<passwd_algo_t> pass;
@@ -96,16 +96,16 @@ public:
 	void getPasswordForAlgo(const std::string &user, const std::string &host, const std::string &auth_username,
 				AuthDbListener *listener, AuthDbListener *listener_ref);
 	void getUserWithPhone(const std::string &phone, const std::string &domain, AuthDbListener *listener);
-	void getUsersWithPhone(std::list<std::tuple<std::string, std::string, AuthDbListener *>> &creds, AuthDbListener *listener);
+	void getUsersWithPhone(std::list<std::tuple<std::string, std::string, AuthDbListener *>> &creds);
 	virtual void getUserWithPhoneFromBackend(const std::string &, const std::string &, AuthDbListener *listener) = 0;
-	virtual void getUsersWithPhonesFromBackend(std::list<std::tuple<std::string, std::string, AuthDbListener *>> &creds, AuthDbListener *listener);
+	virtual void getUsersWithPhonesFromBackend(std::list<std::tuple<std::string, std::string, AuthDbListener *>> &creds);
 
 	virtual void createAccount(const std::string &user, const std::string &domain, const std::string &auth_username, const std::string &password, int expires, const std::string &phone_alias = "");
 
 	virtual void getPasswordFromBackend(const std::string &id, const std::string &domain,
 					    const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref) = 0;
 
-	static AuthDbBackend *get();
+	static AuthDbBackend &get();
 	/* called by module_auth so that backends can declare their configuration to the ConfigurationManager */
 	static void declareConfig(GenericStruct *mc);
 	static std::string syncSha256(const char* input,size_t size);
@@ -224,7 +224,11 @@ public:
 	static void declareConfig(GenericStruct *mc){};
 };
 
+}
+
 #if ENABLE_ODBC
+
+namespace flexisip {
 
 class OdbcAuthDb : public AuthDbBackend {
 	~OdbcAuthDb();
@@ -276,12 +280,16 @@ public:
 	static void declareConfig(GenericStruct *mc);
 };
 
+}
+
 #endif /* ENABLE_ODBC */
 
 #if ENABLE_SOCI
 
 #include "soci/soci.h"
 #include "utils/threadpool.hh"
+
+namespace flexisip {
 
 class SociAuthDB : public AuthDbBackend {
 	virtual ~SociAuthDB();
@@ -290,7 +298,7 @@ public:
 	SociAuthDB();
 	void setConnectionParameters(const std::string &domain, const std::string &request);
 	virtual void getUserWithPhoneFromBackend(const std::string & , const std::string &, AuthDbListener *listener);
-	virtual void getUsersWithPhonesFromBackend(std::list<std::tuple<std::string,std::string,AuthDbListener*>> &creds, AuthDbListener *listener);
+	virtual void getUsersWithPhonesFromBackend(std::list<std::tuple<std::string,std::string,AuthDbListener*>> &creds);
 	virtual void getPasswordFromBackend(const std::string &id, const std::string &domain,
 					    const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref);
 
@@ -298,11 +306,12 @@ public:
 
 private:
 	void getUserWithPhoneWithPool(const std::string &phone, const std::string &domain, AuthDbListener *listener);
-	void getUsersWithPhonesWithPool(std::list<std::tuple<std::string,std::string,AuthDbListener*>> &creds, AuthDbListener *listener);
+	void getUsersWithPhonesWithPool(std::list<std::tuple<std::string,std::string,AuthDbListener*>> &creds);
 	void getPasswordWithPool(const std::string &id, const std::string &domain,
 				 const std::string &authid, AuthDbListener *listener, AuthDbListener *listener_ref);
 
 	void reconnectSession( soci::session &session );
+	void notifyAllListeners(std::list<std::tuple<std::string, std::string, AuthDbListener *>> &creds, const std::set<std::pair<std::string, std::string>> &presences);
 
 
 	size_t poolSize;
@@ -318,6 +327,6 @@ private:
 	bool hashed_passwd;
 };
 
-#endif /* ENABLE_SOCI */
+}
 
-#endif
+#endif /* ENABLE_SOCI */

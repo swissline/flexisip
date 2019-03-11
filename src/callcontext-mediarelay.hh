@@ -16,8 +16,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef callcontext_mediarelay_hh
-#define callcontext_mediarelay_hh
+#pragma once
 
 #include "callstore.hh"
 #include <memory>
@@ -27,7 +26,7 @@
 #include <map>
 #include <tuple>
 
-
+namespace flexisip {
 
 class TranscodedCall;
 
@@ -35,6 +34,8 @@ class RelayedCall: public CallContextBase {
 public:
 	static const int sMaxSessions = 4;
 	RelayedCall(const std::shared_ptr<MediaRelayServer> &server, sip_t *sip);
+
+	void forcePublicAddress(bool force) {mForcePublicAddressEnabled = force;}
 
 	/* Create a channel for each sdp media using defined relay ip for front and back. The transaction
 	 * allow use to identify the callee (we don't have a tag yet).
@@ -81,9 +82,7 @@ private:
 	bool mDropTelephoneEvents;
 	bool mHasSendRecvBack;
 	bool mIsEstablished;
+	bool mForcePublicAddressEnabled = false;
 };
 
-
-#endif
-
-
+}

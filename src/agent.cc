@@ -16,13 +16,14 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "agent.hh"
-#include "module.hh"
+#include <flexisip/agent.hh>
+#include <flexisip/module.hh>
+
 #include "domain-registrations.hh"
 #include "plugin/plugin-loader.hh"
-#include "registrardb.hh"
+#include <flexisip/registrardb.hh>
 
-#include "log/logmanager.hh"
+#include <flexisip/logmanager.hh>
 #include "sipattrextractor.hh"
 
 #include "etchosts.hh"
@@ -39,11 +40,11 @@
 #include <netdb.h>
 
 #include <net/if.h>
-#include <ifaddrs.h>
 
 #define IPADDR_SIZE 64
 
 using namespace std;
+using namespace flexisip;
 
 static StatCounter64 *createCounter(GenericStruct *global, string keyprefix, string helpprefix, string value) {
 	return global->createStat(keyprefix + value, helpprefix + value + ".");
@@ -95,7 +96,6 @@ void Agent::onDeclare(GenericStruct *root) {
 	mCountReply487 = createCounter(global, key, help, "487"); // Request canceled
 	mCountReply488 = createCounter(global, key, help, "488");
 	mCountReplyResUnknown = createCounter(global, key, help, "unknown");
-	mLogWriter = NULL;
 
 	string uniqueId = global->get<ConfigString>("unique-id")->read();
 	if (!uniqueId.empty()) {
@@ -128,7 +128,7 @@ void Agent::startLogWriter() {
 			if (!dbw->isReady()) {
 				LOGF("DataBaseEventLogWriter: unable to use database.");
 			} else {
-				mLogWriter = dbw;
+				mLogWriter.reset(dbw);
 			}
 			#else
 				LOGF("DataBaseEventLogWriter: unable to use database (`ENABLE_SOCI` is not defined).");
@@ -139,7 +139,7 @@ void Agent::startLogWriter() {
 			if (!lw->isReady()) {
 				delete lw;
 			} else {
-				mLogWriter = lw;
+				mLogWriter.reset(lw);
 			}
 		}
 	}
@@ -272,6 +272,10 @@ void Agent::startMdns(){
 #endif
 }
 
+static void timerfunc(su_root_magic_t *magic, su_timer_t *t, Agent *a) {
+	a->idle();
+}
+
 void Agent::start(const string &transport_override, const string passphrase) {
 	char cCurrDir[FILENAME_MAX];
 	if (!getcwd(cCurrDir, sizeof(cCurrDir))) {
@@ -292,8 +296,11 @@ void Agent::start(const string &transport_override, const string passphrase) {
 	unsigned int keepAliveInterval = global->get<ConfigInt>("keepalive-interval")->read() * 1000;
 	unsigned int queueSize = 256; /*number of SIP message that sofia can queue in a tport (a connection). It is 64 by default,
 				hardcoded in sofia-sip. This is not sufficient for IM.*/
-				
+
 	mProxyToProxyKeepAliveInterval = global->get<ConfigInt>("proxy-to-proxy-keepalive-interval")->read() * 1000;
+
+	mTimer = su_timer_create(su_root_task(mRoot), 5000);
+	su_timer_set_for_ever(mTimer, reinterpret_cast<su_timer_f>(timerfunc), this);
 
 	mainTlsCertsDir = absolutePath(currDir, mainTlsCertsDir);
 
@@ -387,7 +394,7 @@ void Agent::start(const string &transport_override, const string passphrase) {
 	tport_t *primaries = tport_primaries(nta_agent_tports(mAgent));
 	if (primaries == NULL)
 		LOGF("No sip transport defined.");
-	
+
 	startMdns();
 
 	/*
@@ -418,14 +425,10 @@ void Agent::start(const string &transport_override, const string passphrase) {
 		// where public is the hostname or ip address publicly announced
 		// and maddr the real ip we listen on.
 		// Useful for a scenario where the flexisip is behind a router.
-		bool isBindNotPublic = strcmp(name->tpn_canon, name->tpn_host) != 0;
-
 		if (isIpv6 && mPublicIpV6.empty()) {
 			mPublicIpV6 = ModuleToolbox::getHost(name->tpn_canon);
-			if (isBindNotPublic) mRtpBindIp6 = ModuleToolbox::getHost(name->tpn_host);
 		} else if (!isIpv6 && mPublicIpV4.empty()) {
 			mPublicIpV4 = name->tpn_canon;
-			if (isBindNotPublic) mRtpBindIp = name->tpn_host;
 		}
 
 		if (mNodeUri == NULL) {
@@ -442,11 +445,6 @@ void Agent::start(const string &transport_override, const string passphrase) {
 
 	bool clusterModeEnabled = GenericManager::get()->getRoot()->get<GenericStruct>("cluster")->get<ConfigBoolean>("enabled")->read();
 	mDefaultUri = (clusterModeEnabled && mClusterUri) ? mClusterUri : mNodeUri;
-
-	if (mRtpBindIp.empty())
-		mRtpBindIp = "0.0.0.0";
-	if (mRtpBindIp6.empty())
-		mRtpBindIp6 = "::0";
 
 	mPublicResolvedIpV4 = computeResolvedPublicIp(mPublicIpV4, AF_INET);
 	if (mPublicResolvedIpV4.empty()) {
@@ -557,6 +555,25 @@ void addPluginModule(Agent *agent, list<Module *> &modules, const string &plugin
 		SLOGE << "Unable to get module info of [" << pluginName << "] plugin (" << pluginLoader.getError() << ").";
 		return;
 	}
+	const string &moduleName = moduleInfo->getModuleName();
+	Module *module = pluginLoader.get();
+
+	const string &replace = moduleInfo->getReplace();
+	if (!replace.empty()) {
+		auto it = find_if(modules.begin(), modules.end(), [&replace](const Module *module) {
+			return module->getModuleName() == replace;
+		});
+		if (it == modules.end()) {
+			SLOGE << "Unable to find module [" << replace << "]'s instance to be replaced by module [" << moduleName << "]'s instance";
+			return;
+		}
+		
+		SLOGW << "Creating plugin module " << "[" << moduleName << "]'s instance that will replace module [" << replace << "]'s instance.";
+		// Replace the previous module by the new one in the chain
+		it = modules.erase(it);
+		modules.insert(it, module);
+		return;
+	}
 
 	for (const string &after : moduleInfo->getAfter()) {
 		// TODO: Replace begin() and end() with cbegin() and cend() later.
@@ -567,8 +584,6 @@ void addPluginModule(Agent *agent, list<Module *> &modules, const string &plugin
 		if (it == modules.end())
 			continue;
 
-		const string &moduleName = moduleInfo->getModuleName();
-		Module *module = pluginLoader.get();
 		if (!module) {
 			SLOGE << "Failed to load [" << moduleName << "] (" << pluginLoader.getError() << ").";
 		} else {
@@ -645,6 +660,8 @@ Agent::~Agent() {
 	for (Module *module : mModules)
 		delete module;
 
+	if (mTimer)
+		su_timer_destroy(mTimer);
 	if (mDrm)
 		delete mDrm;
 	if (mAgent)

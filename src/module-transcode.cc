@@ -16,88 +16,10 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifdef HAVE_CONFIG_H
-#include "flexisip-config.h"
-#endif
-
-#include "module.hh"
-#include "agent.hh"
-
-#ifdef ENABLE_TRANSCODER
-#include "callcontext-transcoder.hh"
-#include "sdp-modifier.hh"
-#endif
-
-#include <vector>
-#include <functional>
-#include <algorithm>
-
+#include "module-transcode.hh"
 
 using namespace std;
-
-#ifdef ENABLE_TRANSCODER
-class TickerManager {
-public:
-	TickerManager() : mLastTickerIndex(0), mStarted(false) {
-	}
-	MSTicker *chooseOne() {
-		if (!mStarted) {
-			int cpucount = ModuleToolbox::getCpuCount();
-			mLastTickerIndex = 0;
-			for (int i = 0; i < cpucount; ++i) {
-				mTickers.push_back(ms_ticker_new());
-			}
-			mStarted = true;
-		}
-		if (mLastTickerIndex >= mTickers.size())
-			mLastTickerIndex = 0;
-		return mTickers[mLastTickerIndex++];
-	}
-	~TickerManager() {
-		for_each(mTickers.begin(), mTickers.end(), ptr_fun(ms_ticker_destroy));
-	}
-
-private:
-	vector<MSTicker *> mTickers;
-	unsigned int mLastTickerIndex;
-	bool mStarted;
-};
-#endif
-
-class Transcoder : public Module, protected ModuleToolbox {
-public:
-	Transcoder(Agent *ag);
-	~Transcoder();
-	virtual void onLoad(const GenericStruct *module_config);
-	virtual void onRequest(shared_ptr<RequestSipEvent> &ev);
-	virtual void onResponse(shared_ptr<ResponseSipEvent> &ev);
-	virtual void onIdle();
-	virtual void onDeclare(GenericStruct *mc);
-#ifdef ENABLE_TRANSCODER
-private:
-	TickerManager mTickerManager;
-	int handleOffer(TranscodedCall *c, shared_ptr<SipEvent> ev);
-	int handleAnswer(TranscodedCall *c, shared_ptr<SipEvent> ev);
-	int processInvite(TranscodedCall *c, shared_ptr<RequestSipEvent> &ev);
-	void process200OkforInvite(TranscodedCall *ctx, shared_ptr<ResponseSipEvent> &ev);
-	void processAck(TranscodedCall *ctx, shared_ptr<RequestSipEvent> &ev);
-	bool processSipInfo(TranscodedCall *c, shared_ptr<RequestSipEvent> &ev);
-	void onTimer();
-	static void sOnTimer(void *unused, su_timer_t *t, void *zis);
-	bool canDoRateControl(sip_t *sip);
-	bool hasSupportedCodec(const list<PayloadType *> &ioffer);
-	void normalizePayloads(std::list<PayloadType *> &l);
-	list<PayloadType *> orderList(const list<string> &config, const std::list<PayloadType *> &l);
-	list<PayloadType *> mSupportedAudioPayloads;
-	CallStore mCalls;
-	su_timer_t *mTimer;
-	list<string> mRcUserAgents;
-	MSFactory *mFactory;
-	CallContextParams mCallParams;
-	bool mRemoveBandwidthsLimits;
-#endif
-	static ModuleInfo<Transcoder> sInfo;
-};
+using namespace flexisip;
 
 ModuleInfo<Transcoder> Transcoder::sInfo(
 	"Transcoder",
@@ -368,7 +290,7 @@ int Transcoder::handleOffer(TranscodedCall *c, shared_ptr<SipEvent> ev) {
 
 		int blport = c->getBackSide()->getAudioPort();
 		const short ipVersion = m->getAudioIpVersion();
-		const char *publicIp = getAgent()->getPublicIp(ipVersion == 6).c_str();
+		const char *publicIp = getAgent()->getResolvedPublicIp(ipVersion == 6).c_str();
 		LOGD("Using public ip%s %s", ipVersion == 6 ? "v6" : "v4", publicIp);
 		m->changeAudioIpPort(publicIp, blport);
 		LOGD("Back side local port: %s:%i <-> ?", publicIp, blport);
@@ -485,7 +407,7 @@ int Transcoder::handleAnswer(TranscodedCall *ctx, shared_ptr<SipEvent> ev) {
 		m->setPtime(0); // remove the ptime attribute
 	}
 	const short ipVersion = m->getAudioIpVersion();
-	const char *publicIp = getAgent()->getPublicIp(ipVersion == 6).c_str();
+	const char *publicIp = getAgent()->getResolvedPublicIp(ipVersion == 6).c_str();
 	LOGD("Using public ip%s %s", ipVersion == 6 ? "v6" : "v4", publicIp);
 	m->changeAudioIpPort(publicIp, ctx->getFrontSide()->getAudioPort());
 

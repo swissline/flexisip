@@ -63,10 +63,7 @@ Requires: %{pkg_prefix}belle-sip
 Requires: %{pkg_prefix}liblinphone
 %endif
 
-Requires(post): /sbin/chkconfig coreutils
-Requires(preun): /sbin/chkconfig /sbin/chkconfig
-Requires(postun): /sbin/service
-
+%{systemd_requires}
 
 %if 0%{?rhel} && 0%{?rhel} <= 7
 %global cmake_name cmake3
@@ -75,6 +72,8 @@ Requires(postun): /sbin/service
 %global cmake_name cmake
 %define ctest_name ctest
 %endif
+
+%global flexisip_services %(printf 'flexisip.service flexisip-proxy.service'; if [ @ENABLE_PRESENCE@ -eq 1 ]; then printf ' flexisip-presence.service'; fi; if [ @ENABLE_CONFERENCE@ -eq 1 ]; then printf ' flexisip-conference.service\n'; fi)
 
 %description
 Extensible SIP proxy with media capabilities. Designed for robustness and easy of use.
@@ -94,6 +93,20 @@ JweAuth plugin offers the possibility to use JSON Web Encryption tokens on flexi
 
 %endif
 
+%if @ENABLE_EXTERNAL_AUTH_PLUGIN@
+
+%package external-auth-plugin
+Summary:       Add the ability to delegate authentication process to an external HTTP server
+Group:         Security
+
+Requires:      %{name} = %{epoch}:%{version}-%{release}
+
+%description external-auth-plugin
+Add the ability to delegate authentication process to an external HTTP server.
+
+%endif
+
+
 # This is for debian builds where debug_package has to be manually specified, whereas in centos it does not
 %define custom_debug_package %{!?_enable_debug_packages:%debug_package}%{?_enable_debug_package:%{nil}}
 %custom_debug_package
@@ -102,7 +115,7 @@ JweAuth plugin offers the possibility to use JSON Web Encryption tokens on flexi
 %setup -n %{name}-%{version}-%build_number
 
 %build
-%{expand:%%%cmake_name} . -DCMAKE_BUILD_TYPE=@CMAKE_BUILD_TYPE@ -DCMAKE_INSTALL_LIBDIR:PATH=%{_libdir} -DCMAKE_PREFIX_PATH:PATH=%{_prefix} -DSYSCONF_INSTALL_DIR:PATH=%{_sysconfdir} @RPM_ALL_CMAKE_OPTIONS@
+%{expand:%%%cmake_name} . -DCMAKE_BUILD_TYPE=@CMAKE_BUILD_TYPE@ -DCMAKE_PREFIX_PATH:PATH=%{_prefix} -DSYSCONF_INSTALL_DIR:PATH=%{_sysconfdir} @RPM_ALL_CMAKE_OPTIONS@
 
 
 make %{?_smp_mflags}
@@ -115,21 +128,9 @@ make install DESTDIR=%{buildroot}
 # Shouldn't be the role of cmake to install all the following stuff ?
 # It is surprising to let the specfile install all these things from the source tree.
 #
-mkdir -p  $RPM_BUILD_ROOT/etc/init.d
 mkdir -p  $RPM_BUILD_ROOT/etc/flexisip
 mkdir -p  $RPM_BUILD_ROOT/%{_docdir}
 mkdir -p  $RPM_BUILD_ROOT/%{_localstatedir}/log/flexisip
-%if "0%{?dist}" == "0.deb"
-  install -p -m 0744 scripts/debian/flexisip $RPM_BUILD_ROOT%{_sysconfdir}/init.d/flexisip
-  %if @ENABLE_PRESENCE@
-    install -p -m 0744 scripts/debian/flexisip-presence $RPM_BUILD_ROOT%{_sysconfdir}/init.d/flexisip-presence
-  %endif
-%else
-  install -p -m 0744 scripts/redhat/flexisip $RPM_BUILD_ROOT%{_sysconfdir}/init.d/flexisip
-  %if @ENABLE_PRESENCE@
-    install -p -m 0744 scripts/redhat/flexisip-presence $RPM_BUILD_ROOT%{_sysconfdir}/init.d/flexisip-presence
-  %endif
-%endif
 
 mkdir -p $RPM_BUILD_ROOT/lib/systemd/system
 install -p -m 0644 scripts/flexisip.service $RPM_BUILD_ROOT/lib/systemd/system
@@ -157,47 +158,13 @@ install -p -m 0744 scripts/flexisip_monitor.py $RPM_BUILD_ROOT%{_bindir}
 rm -rf $RPM_BUILD_ROOT
 
 %post
-if [ $1 = 1 ]; then
-  /sbin/chkconfig --add flexisip-proxy
-  /sbin/chkconfig flexisip-proxy on
-  service flexisip-proxy start
-
-  %if @ENABLE_PRESENCE@
-  /sbin/chkconfig --add flexisip-presence
-  /sbin/chkconfig flexisip-presence on
-  service flexisip-presence start
-  %endif
-  %if @ENABLE_CONFERENCE@
-  /sbin/chkconfig --add flexisip-conference
-  /sbin/chkconfig flexisip-conference on
-  service flexisip-conference start
-  %endif
-fi
+%systemd_post %flexisip_services
 
 %preun
-if [ $1 = 0 ]; then
-  service flexisip-proxy stop >/dev/null 2>&1 ||:
-  /sbin/chkconfig --del flexisip-proxy
-%if @ENABLE_PRESENCE@
-  service flexisip-presence stop >/dev/null 2>&1 ||:
-  /sbin/chkconfig --del flexisip-presence
-%endif
-%if @ENABLE_CONFERENCE@
-  service flexisip-conference stop >/dev/null 2>&1 ||:
-  /sbin/chkconfig --del flexisip-conference
-%endif
-fi
+%systemd_preun %flexisip_services
 
 %postun
-if [ "$1" -ge "1" ]; then
-  service flexisip condrestart > /dev/null 2>&1 ||:
-%if @ENABLE_PRESENCE@
-  service flexisip-presence condrestart > /dev/null 2>&1 ||:
-%endif
-%if @ENABLE_CONFERENCE@
-  service flexisip-conference condrestart > /dev/null 2>&1 ||:
-%endif
-fi
+%systemd_postun %flexisip_services
 
 %files
 %defattr(-,root,root,-)
@@ -205,9 +172,12 @@ fi
 %{_bindir}/*
 %{_libdir}/*.so
 %{_datarootdir}/*
+%dir %{_includedir}/flexisip
+%{_includedir}/flexisip/*.hh
+%{_includedir}/flexisip/*.h
+%{_localstatedir}/*
 
 %if @ENABLE_PRESENCE@
-%{_sysconfdir}/init.d/flexisip-presence
 /lib/systemd/system/flexisip-presence.service
 /lib/systemd/system/flexisip-presence@.service
 %endif
@@ -217,7 +187,6 @@ fi
 	/lib/systemd/system/flexisip-conference@.service
 %endif
 
-%{_sysconfdir}/init.d/flexisip
 %{_sysconfdir}/flexisip
 %{_sysconfdir}/logrotate.d/flexisip-logrotate
 /lib/systemd/system/flexisip.service
@@ -232,26 +201,51 @@ fi
 %{_libdir}/flexisip/plugins/libjweauth.so.*
 %endif
 
+%if @ENABLE_EXTERNAL_AUTH_PLUGIN@
+%files external-auth-plugin
+%defattr(-,root,root,-)
+%{_libdir}/flexisip/plugins/libexternal-auth.so
+%{_libdir}/flexisip/plugins/libexternal-auth.so.*
+%endif
+
+
 %changelog
+
+* Wed Jan 16 2019 Sylvain Berfini <sylvain.berfini@belledonne-communications.com>
+- Added include directory with flexisip header files
+
+* Tue Nov 27 2018 ronan.abhamon <ronan.abhamon@belledonne-communications.com>
+- Do not set CMAKE_INSTALL_LIBDIR and never with _libdir!
+
 * Mon Nov 05 2018 Nicolas Michon <nicolas.michon@belledonne-communications.com>
 - Add share directory
+
 * Wed Oct 31 2018 ronan.abhamon <ronan.abhamon@belledonne-communications.com>
 - Use epoch in JweAuth plugin requires
+
 * Wed Jun 13 2018 ronan.abhamon <ronan.abhamon@belledonne-communications.com>
 - Add JweAuth plugin
+
 * Tue Aug 29  2017 Jehan Monnier <jehan.monnier@linphone.org>
 - cmake port
+
 * Fri Dec 02 2016 Simon Morlat <simon.morlat@linphone.org>
 - Add init scripts for flexisip-presence
+
 * Thu Jul 28 2016 François Grisez <francois.grisez@belledonne-communications.com>
 - Add systemd unit files
+
 * Mon Feb 08 2016 Guillaume Bienkowski <gbi@linphone.org>
 - Add soci option
+
 * Wed Nov 04 2015 Sylvain Berfini <sylvain.berfini@linphone.org>
 - Add option to disable odb
+
 * Tue Oct 14 2014 Guillaume Bienkowski <gbi@linphone.org>
 - Add /opt packaging possibility
+
 * Wed Feb 15 2012 Guillaume Beraudo <guillaume.beraudo@belledonne-communications.com>
 - Force use of redhat init script
+
 * Tue Oct 19 2010 Simon Morlat <simon.morlat@belledonne-communications.com>
 - Initial specfile for first prototype release

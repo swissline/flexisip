@@ -16,15 +16,16 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "module.hh"
-#include "agent.hh"
+#include <flexisip/module.hh>
+#include <flexisip/agent.hh>
 #include "authdb.hh"
-#include "registrardb.hh"
+#include <flexisip/registrardb.hh>
 #include <sofia-sip/nua.h>
 #include <sofia-sip/sip_status.h>
 #include <limits.h>
 
 using namespace std;
+using namespace flexisip;
 
 class GatewayAdapter;
 
@@ -149,26 +150,25 @@ private:
 		~OnFetchListener() {
 		}
 
-		void onInvalid() {
+		void onInvalid() override{
 			LOGD("GATEWAY: invalid");
 		}
 
-		void onRecordFound(Record *r) {
+		void onRecordFound(const shared_ptr<Record> &r) override {
 			if (r == NULL) {
 				LOGD("Record doesn't exist. Fork");
-				AuthDbBackend *mAuthDb = AuthDbBackend::get();
 				url_t *url = gw->getFrom()->a_url;
-				mAuthDb->getPassword(url->url_user, url->url_host, url->url_user, new OnAuthListener(gw));
+				AuthDbBackend::get().getPassword(url->url_user, url->url_host, url->url_user, new OnAuthListener(gw));
 			} else {
 				LOGD("Record already exists. Not forked");
 			}
 		}
 
-		void onError() {
+		void onError() override{
 			gw->onError("Fetch error.");
 		}
 
-		void onContactUpdated(const shared_ptr<ExtendedContact> &ec) {
+		void onContactUpdated(const shared_ptr<ExtendedContact> &ec) override{
 		}
 	};
 };

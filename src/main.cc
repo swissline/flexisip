@@ -36,16 +36,16 @@
 #include <mediastreamer2/msfactory.h>
 #endif
 
-#include "agent.hh"
+#include <flexisip/agent.hh>
 #include "cli.hh"
 #include "stun.hh"
-#include "module.hh"
+#include <flexisip/module.hh>
 
 #include <cstdlib>
 #include <cstdio>
 #include <csignal>
 
-#include "expressionparser.hh"
+#include <flexisip/expressionparser.hh>
 #include "configdumper.hh"
 
 #include <sofia-sip/su_log.h>
@@ -58,12 +58,12 @@
 #define VERSION "DEVEL"
 #endif // VERSION
 
-#include "flexisip_gitversion.h"
+#include <flexisip/flexisip-version.h>
 #ifndef FLEXISIP_GIT_VERSION
 #define FLEXISIP_GIT_VERSION "undefined"
 #endif
 
-#include "log/logmanager.hh"
+#include <flexisip/logmanager.hh>
 #include <ortp/ortp.h>
 #include <functional>
 #include <list>
@@ -108,6 +108,7 @@ static std::shared_ptr<flexisip::ConferenceServer> conferenceServer;
 #endif // ENABLE_CONFERENCE
 
 using namespace std;
+using namespace flexisip;
 
 static unsigned long threadid_cb(){
 	return (unsigned long)pthread_self();
@@ -154,10 +155,6 @@ static void sofiaLogHandler(void *, const char *fmt, va_list ap) {
 		LOGDV(copy, ap);
 		free(copy);
 	}
-}
-
-static void timerfunc(su_root_magic_t *magic, su_timer_t *t, Agent *a) {
-	a->idle();
 }
 
 static std::map<msg_t *, string> msg_map;
@@ -471,11 +468,15 @@ static void depthFirstSearch(string &path, GenericEntry *config, list<string> &a
 	}
 }
 
-static int dump_config(su_root_t *root, const std::string &dump_cfg_part, bool with_experimental,
-					   const string &format) {
+static int dump_config(su_root_t *root, const std::string &dump_cfg_part, bool with_experimental, bool dumpDefault, const string &format) {
+	GenericManager::get()->applyOverrides(true);
+	ConfigString *pluginsDirEntry = GenericManager::get()->getGlobal()->get<ConfigString>("plugins-dir");
+	if (pluginsDirEntry->get().empty()) {
+		pluginsDirEntry->set(DEFAULT_PLUGINS_DIR);
+	}
 	shared_ptr<Agent> a = make_shared<Agent>(root);
-	GenericStruct *rootStruct = GenericManager::get()->getRoot();
 
+	GenericStruct *rootStruct = GenericManager::get()->getRoot();
 	if (dump_cfg_part != "all") {
 
 		size_t prefix_location = dump_cfg_part.find("module::");
@@ -506,7 +507,10 @@ static int dump_config(su_root_t *root, const std::string &dump_cfg_part, bool w
 	} else if (format == "doku") {
 		dumper = new DokuwikiConfigDumper(rootStruct);
 	} else if (format == "file") {
-		dumper = new FileConfigDumper(rootStruct);
+		FileConfigDumper *fileDumper = new FileConfigDumper(rootStruct);
+		fileDumper->setMode(dumpDefault ? FileConfigDumper::Mode::DefaultValue : FileConfigDumper::Mode::DefaultIfUnset);
+		dumper = fileDumper;
+
 	} else if (format == "media") {
 		dumper = new MediaWikiConfigDumper(rootStruct);
 	} else if (format == "xwiki") {
@@ -609,9 +613,11 @@ int main(int argc, char *argv[]) {
 #ifdef ENABLE_PRESENCE
 	unique_ptr<CommandLineInterface> presence_cli;
 #endif
+#ifdef ENABLE_SNMP
+	unique_ptr<SnmpAgent> snmpAgent;
+#endif
 	bool debug;
 	bool user_errors = false;
-	map<string, string> oset;
 
 	string versionString = version();
 	// clang-format off
@@ -632,12 +638,16 @@ int main(int argc, char *argv[]) {
 
 	TCLAP::SwitchArg              dumpMibs("",  "dump-mibs", 		"Will dump the MIB files for Flexisip performance counters and other related SNMP items.", cmd);
 	TCLAP::ValueArg<string>    dumpDefault("",  "dump-default",		"Dump default config, with specifier for the module to dump. Use 'all' to dump all modules, or 'MODULENAME' to dump "
-										   							"a specific module. For instance, to dump the Router module default config, issue 'flexisip --dump-default module::Router.",
-										   TCLAP::ValueArgOptional, "", "all", cmd);
+										   							"a specific module. For instance, to dump the Router module default config, "
+																	"issue 'flexisip --dump-default module::Router.", TCLAP::ValueArgOptional, "", "all", cmd);
 
-	TCLAP::SwitchArg               dumpAll("",  "dump-all-default", "Will dump all the configuration. This is equivalent to '--dump-default all'.", cmd);
-	TCLAP::ValueArg<string>     dumpFormat("",  "dump-format",		"Select the format in which the dump-default will print. The default is 'file'. Possible values are: file, tex, doku, media.",
-										   TCLAP::ValueArgOptional, "file", "file", cmd);
+	TCLAP::SwitchArg               dumpAll("",  "dump-all-default", "Will dump all the configuration. This is equivalent to '--dump-default all'. This option may be combined with "
+																	"'--set global/plugins=<plugin_list>' to also generate the settings of listed plugins.", cmd);
+	TCLAP::ValueArg<string>     dumpFormat("",  "dump-format",		"Select the format in which the dump-default will print. The default is 'file'. Possible values are: "
+																	"file, tex, doku, media.", TCLAP::ValueArgOptional, "file", "file", cmd);
+
+	TCLAP::SwitchArg           rewriteConf("",  "rewrite-config",   "Load the configuration file and dump a new one on stdout, adding the new settings and updating documentations. "
+	                                                                "All the existing settings are kept even if they are equal to the default value and the default value has changed.", cmd);
 
 	TCLAP::SwitchArg           listModules("",  "list-modules", 	"Will print a list of available modules. This is useful if you want to combine with --dump-default "
 										   							"to have specific documentation for a module.", cmd);
@@ -672,19 +682,17 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	if (overrideConfig.getValue().size() != 0) {
-		auto values = overrideConfig.getValue();
-		for (auto it = values.begin(); it != values.end(); ++it) {
-			auto pair = *it;
-			size_t eq = pair.find("=");
-			if (eq != pair.npos) {
-				oset[pair.substr(0, eq)] = pair.substr(eq + 1);
-			}
+	map<string, string> oset;
+	for (const string &kv : overrideConfig.getValue()) {
+		auto equal = find(kv.cbegin(), kv.cend(), '=');
+		if (equal != kv.cend()) {
+			oset[string(kv.cbegin(), equal)] = string(equal+1, kv.cend());
 		}
 	}
 
 	// Instanciate the Generic manager
 	GenericManager *cfg = GenericManager::get();
+	cfg->setOverrideMap(oset);
 
 	// list default config and exit
 	std::string module = dumpDefault.getValue();
@@ -693,7 +701,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	if (module.length() != 0) {
-		int status = dump_config(root, module, displayExperimental, dumpFormat.getValue());
+		int status = dump_config(root, module, displayExperimental, true, dumpFormat.getValue());
 		return status;
 	}
 
@@ -731,8 +739,6 @@ int main(int argc, char *argv[]) {
 		return EXIT_SUCCESS;
 	}
 
-	GenericManager::get()->setOverrideMap(oset);
-
 	if (cfg->load(configFile.getValue().c_str()) == -1) {
 		fprintf(stderr, "Flexisip version %s\n"
 						"No configuration file found at %s.\nPlease specify a valid configuration file.\n"
@@ -742,6 +748,10 @@ int main(int argc, char *argv[]) {
 						"'--dump-default all' option.\n",
 				versionString.c_str(), configFile.getValue().c_str());
 		return -1;
+	}
+
+	if (rewriteConf) {
+		return dump_config(root, "all", displayExperimental, false, "file");
 	}
 
 	if (!debug){
@@ -886,12 +896,11 @@ int main(int argc, char *argv[]) {
 	#ifdef ENABLE_SNMP
 		bool snmpEnabled = cfg->getGlobal()->get<ConfigBoolean>("enable-snmp")->read();
 		if (snmpEnabled) {
-			SnmpAgent lAgent(*a, *cfg, oset);
+			snmpAgent.reset(new SnmpAgent(*a, *cfg, oset));
 		}
 	#endif
 
-		if (!oset.empty())
-			cfg->applyOverrides(true); // using default + overrides
+		cfg->applyOverrides(true); // using default + overrides
 
 		// Create cached test accounts for the Flexisip monitor if necessary
 		if (monitorEnabled) {
@@ -920,7 +929,7 @@ int main(int argc, char *argv[]) {
 	if (startPresence){
 #ifdef ENABLE_PRESENCE
 		bool enableLongTermPresence = (cfg->getRoot()->get<GenericStruct>("presence-server")->get<ConfigBoolean>("long-term-enabled")->read());
-		presenceServer = make_shared<flexisip::PresenceServer>(startProxy);
+		presenceServer = make_shared<flexisip::PresenceServer>(root);
 		if (enableLongTermPresence) {
 			auto presenceLongTerm = make_shared<flexisip::PresenceLongterm>(presenceServer->getBelleSipMainLoop());
 			presenceServer->addPresenceInfoObserver(presenceLongTerm);
@@ -930,7 +939,6 @@ int main(int argc, char *argv[]) {
 		}
 		try{
 			presenceServer->init();
-			presenceServer->run();
 		}catch(FlexisipException &e){
 			/* Catch the presence server exception, which is generally caused by a failure while binding the SIP listening points.
 			 * Since it prevents from starting and it is not a crash, it shall be notified to the user with LOGF*/
@@ -944,13 +952,12 @@ int main(int argc, char *argv[]) {
 
 	if (startConference){
 #ifdef ENABLE_CONFERENCE
-		conferenceServer = make_shared<flexisip::ConferenceServer>(startProxy, a->getPreferredRoute(), root);
+		conferenceServer = make_shared<flexisip::ConferenceServer>(a->getPreferredRoute(), root);
 		if (daemonMode) {
 			notifyWatchDog();
 		}
 		try{
 			conferenceServer->init();
-			conferenceServer->run();
 		}catch(FlexisipException &e){
 			/* Catch the conference server exception, which is generally caused by a failure while binding the SIP listening points.
 			 * Since it prevents from starting and it is not a crash, it shall be notified to the user with LOGF*/
@@ -959,28 +966,18 @@ int main(int argc, char *argv[]) {
 #endif // ENABLE_CONFERENCE
 	}
 
-	if (startProxy || startConference){
-		su_timer_t *timer;
-		if (startProxy) {
-			timer = su_timer_create(su_root_task(root), 5000);
-			su_timer_set_for_ever(timer, (su_timer_f)timerfunc, a.get());
-		}
-		su_root_run(root);
-		if (startProxy) {
-			su_timer_destroy(timer);
-			a->unloadConfig();
-		}
-	}
+	su_root_run(root);
 
+	a->unloadConfig();
 	a.reset();
 #ifdef ENABLE_PRESENCE
 	presence_cli = nullptr;
-	presenceServer->stop();
+	if (presenceServer) presenceServer->stop();
 	presenceServer.reset();
 #endif // ENABLE_PRESENCE
 
 #ifdef ENABLE_CONFERENCE
-	conferenceServer->stop();
+	if (conferenceServer) conferenceServer->stop();
 	conferenceServer.reset();
 #endif // ENABLE_CONFERENCE
 

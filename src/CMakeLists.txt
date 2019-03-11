@@ -35,6 +35,10 @@ set(FLEXISIP_DEPENDENCIES)
 
 set(FLEXISIP_SOURCES
 	agent.cc
+	auth/auth-module.cc
+	auth/flexisip-auth-module.cc
+	auth/flexisip-auth-module-base.cc
+	auth/nonce-store.cc
 	authdb-file.cc
 	authdb.cc
 	callcontext-mediarelay.cc
@@ -93,6 +97,7 @@ set(FLEXISIP_SOURCES
 	registrardb.cc
 	sdp-modifier.cc
 	sipattrextractor.cc
+	service-server.cc
 	stun.cc
 	stun/stun_udp.c
 	stun/stun.c
@@ -100,16 +105,13 @@ set(FLEXISIP_SOURCES
 	transaction.cc
 	uac-register.cc
 	utils/httputils.cc
+	utils/sip-uri.cc
+	utils/string-formater.cc
+	utils/string-utils.cc
 	utils/threadpool.cc
 )
 
-find_package(Git)
-add_custom_target(flexisip-git-version
-	COMMAND ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -DFLEXISIP_VERSION=${FLEXISIP_VERSION} -DWORK_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/gitversion.cmake
-	BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/flexisip_gitversion.h"
-)
-
-list(APPEND FLEXISIP_INCLUDES ${BCTOOLBOX_INCLUDE_DIRS} ${BELR_INCLUDE_DIRS})
+list(APPEND FLEXISIP_INCLUDES ${FLEXISIP_HEADER_DIR} ${BCTOOLBOX_INCLUDE_DIRS} ${BELR_INCLUDE_DIRS})
 
 if(LIBXSD_FOUND)
 	list(APPEND FLEXISIP_LIBS ${LIBXSD_LIBRARIES})
@@ -208,6 +210,8 @@ if(ENABLE_PRESENCE)
 		xml/data-model.hh
 		xml/pidf+xml.cc
 		xml/pidf+xml.hh
+		xml/pidf-oma-pres.cc
+		xml/pidf-oma-pres.hh
 		xml/resource-lists.cc
 		xml/resource-lists.hh
 		xml/rlmi+xml.cc
@@ -233,14 +237,18 @@ if(ENABLE_CONFERENCE)
 		conference/conference-address-generator.hh
 		conference/conference-server.cc
 		conference/conference-server.hh
-		conference/participant-capabilities-check.cc
-		conference/participant-capabilities-check.hh
-		conference/participant-devices-search.cc
-		conference/participant-devices-search.hh
-		conference/participant-registration-subscription.cc
-		conference/participant-registration-subscription.hh
+		conference/registration-subscription.cc
+		conference/registration-subscription.hh
 		conference/participant-registration-subscription-handler.cc
 		conference/participant-registration-subscription-handler.hh
+		
+#		conference/participant-capabilities-check.cc
+#		conference/participant-capabilities-check.hh
+#		conference/participant-devices-search.cc
+#		conference/participant-devices-search.hh
+#		conference/participant-registration-subscription.cc
+#		conference/participant-registration-subscription.hh
+
 	)
 endif()
 
@@ -327,13 +335,17 @@ install(TARGETS flexisip_pusher
 )
 
 # Build plugins.
+if(ENABLE_EXTERNAL_AUTH_PLUGIN)
+    add_subdirectory(plugin/external-auth-plugin)
+endif()
+
 if(ENABLE_JWE_AUTH_PLUGIN)
 	add_subdirectory(plugin/jwe-auth-plugin)
 endif()
 
 # expression parser tester
 if(MEDIASTREAMER2_FOUND)
-	add_executable(expr test/expr.cc expressionparser.cc expressionparser.hh sipattrextractor.hh utils/flexisip-exception.hh)
+	add_executable(expr test/expr.cc expressionparser.cc sipattrextractor.hh)
 	target_link_libraries(expr ${BCTOOLBOX_CORE_LIBRARIES} ${ORTP_LIBRARIES} ${MEDIASTREAMER2_LIBRARIES})
 	set_property(TARGET expr PROPERTY CXX_STANDARD 11)
 	set_property(TARGET expr PROPERTY CXX_STANDARD_REQUIRED ON)

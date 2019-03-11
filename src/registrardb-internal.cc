@@ -16,9 +16,9 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "registrardb.hh"
+#include <flexisip/registrardb.hh>
 #include "registrardb-internal.hh"
-#include "common.hh"
+#include <flexisip/common.hh>
 
 #include <ctime>
 #include <cstdio>
@@ -28,6 +28,7 @@
 #include <sofia-sip/sip_protos.h>
 
 using namespace std;
+using namespace flexisip;
 
 RegistrarDbInternal::RegistrarDbInternal(Agent *ag) : RegistrarDb(ag) {
 	mWritable = true;
@@ -36,10 +37,10 @@ RegistrarDbInternal::RegistrarDbInternal(Agent *ag) : RegistrarDb(ag) {
 void RegistrarDbInternal::doBind(const sip_t *sip, int globalExpire, bool alias, int version, const shared_ptr<ContactUpdateListener> &listener) {
 	string key = Record::defineKeyFromUrl(sip->sip_from->a_url);
 
-	map<string, Record *>::iterator it = mRecords.find(key);
-	Record *r;
+	auto it = mRecords.find(key);
+	shared_ptr<Record> r;
 	if (sip->sip_from && it == mRecords.end()) {
-		r = new Record(sip->sip_from->a_url);
+		r = make_shared<Record>(sip->sip_from->a_url);
 		mRecords.insert(make_pair(key, r));
 		LOGD("Creating AOR %s association", key.c_str());
 	} else {
@@ -55,22 +56,21 @@ void RegistrarDbInternal::doBind(const sip_t *sip, int globalExpire, bool alias,
 
 	r->update(sip, globalExpire, alias, version, listener);
 
-	mLocalRegExpire->update(*r);
+	mLocalRegExpire->update(r);
 	if (listener) listener->onRecordFound(r);
 }
 
 void RegistrarDbInternal::doFetch(const url_t *url, const shared_ptr<ContactUpdateListener> &listener) {
 	string key(Record::defineKeyFromUrl(url));
 
-	map<string, Record *>::iterator it = mRecords.find(key);
-	Record *r = NULL;
+	auto it = mRecords.find(key);
+	shared_ptr<Record> r = NULL;
 	if (it != mRecords.end()) {
 		r = (*it).second;
 		r->clean(getCurrentTime(), listener);
 		if (r->isEmpty()) {
 			mRecords.erase(it);
-			delete r;
-			r = NULL;
+			r = nullptr;
 		}
 	}
 
@@ -81,8 +81,8 @@ void RegistrarDbInternal::doFetchForGruu(const url_t *url, const string &gruu, c
 	string key(Record::defineKeyFromUrl(url));
 	SofiaAutoHome home;
 
-	map<string, Record *>::iterator it = mRecords.find(key);
-	Record *r = NULL;
+	auto it = mRecords.find(key);
+	shared_ptr<Record> r = NULL;
 
 	if (it == mRecords.end()) {
 		listener->onRecordFound(r);
@@ -93,14 +93,13 @@ void RegistrarDbInternal::doFetchForGruu(const url_t *url, const string &gruu, c
 	r->clean(getCurrentTime(), listener);
 	if (r->isEmpty()) {
 		mRecords.erase(it);
-		delete r;
-		r = NULL;
+		r = nullptr;
 		listener->onRecordFound(r);
 		return;
 	}
 
 	const list<shared_ptr<ExtendedContact>> &contacts = r->getExtendedContacts();
-	Record retRecord(url);
+	shared_ptr<Record> retRecord = make_shared<Record>(url);
 	for (const auto &contact : contacts) {
 		if (!url_has_param(contact->mSipContact->m_url, "gr"))
 			continue;
@@ -115,10 +114,10 @@ void RegistrarDbInternal::doFetchForGruu(const url_t *url, const string &gruu, c
 		if (streamGruu.str() != gruu)
 			continue;
 
-		retRecord.pushContact(contact);
+		retRecord->pushContact(contact);
 	}
 
-	listener->onRecordFound(&retRecord);
+	listener->onRecordFound(retRecord);
 }
 
 void RegistrarDbInternal::doClear(const sip_t *sip, const shared_ptr<ContactUpdateListener> &listener) {
@@ -129,7 +128,7 @@ void RegistrarDbInternal::doClear(const sip_t *sip, const shared_ptr<ContactUpda
 		return;
 	}
 
-	map<string, Record *>::iterator it = mRecords.find(key);
+	auto it = mRecords.find(key);
 
 	if (it == mRecords.end()) {
 		listener->onRecordFound(NULL);
@@ -137,7 +136,7 @@ void RegistrarDbInternal::doClear(const sip_t *sip, const shared_ptr<ContactUpda
 	}
 
 	LOGD("AOR %s found", key.c_str());
-	Record *r = (*it).second;
+	shared_ptr<Record> r = (*it).second;
 
 	if (r->isInvalidRegister(sip->sip_call_id->i_id, sip->sip_cseq->cs_seq)) {
 		listener->onInvalid();
@@ -146,7 +145,6 @@ void RegistrarDbInternal::doClear(const sip_t *sip, const shared_ptr<ContactUpda
 
 	mRecords.erase(it);
 	mLocalRegExpire->remove(key);
-	delete r;
 	listener->onRecordFound(NULL);
 }
 

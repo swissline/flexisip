@@ -16,14 +16,13 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef PRESENCETUPLE_HH_
-#define PRESENCETUPLE_HH_
+#pragma once
 
 #include <list>
 #include <map>
 
 #include "pidf+xml.hh"
-#include "utils/flexisip-exception.hh"
+#include <flexisip/flexisip-exception.hh>
 
 typedef struct _belle_sip_uri belle_sip_uri_t;
 typedef struct belle_sip_source belle_sip_source_t;
@@ -136,6 +135,7 @@ class PresentityPresenceInformation : public std::enable_shared_from_this<Presen
 
 	const std::string &getName() { return mName; }
 	void setName(const std::string &name) { mName = name; }
+	void addCapability(const std::string &capability);
 
 	/**
 	 *add notity listener for an entity
@@ -212,11 +212,11 @@ class PresentityPresenceInformation : public std::enable_shared_from_this<Presen
 																			// default presence status (I.E closed) when
 																			// all publish have expired.
 	std::string mName;
+	std::string mCapabilities;
+	std::map<std::string, std::string> mAddedCapabilities;
 };
 
 std::ostream &operator<<(std::ostream &__os, const PresentityPresenceInformation &);
 FlexisipException &operator<<(FlexisipException &ex, const PresentityPresenceInformation &);
 
 } /* namespace flexisip */
-
-#endif /* PRESENCETUPLE_HH_ */

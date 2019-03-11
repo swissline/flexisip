@@ -18,17 +18,16 @@
 
 #include "mediarelay.hh"
 #include "sdp-modifier.hh"
-#include "transaction.hh"
+#include <flexisip/transaction.hh>
 #include "h264iframefilter.hh"
 #include "callcontext-mediarelay.hh"
 
 #include <vector>
 #include <algorithm>
 
-
 using namespace std;
 using namespace ::std::placeholders;
-
+using namespace flexisip;
 
 static bool isEarlyMedia(sip_t *sip) {
 	if (sip->sip_status->st_status == 180 || sip->sip_status->st_status == 183) {
@@ -78,6 +77,8 @@ void MediaRelay::onDeclare(GenericStruct * mc) {
 			{ Integer, "inactivity-period", "Period of time in seconds, after which a relayed call without any activity is "
 				"considered as no longer running. Activity counts RTP/RTCP packets exchanged through the relay and SIP messages.",
 				"3600"},
+			{ Boolean, "force-public-ip-for-sdp-masquerading", "Force the media relay to use the public address of Flexisip to relay calls. It not enabled, Flexisip will deduce a suitable "
+				"IP address by basing on data from SIP messages, which could fail in tricky situations e.g. when Flexisip is behind a TCP proxy.", "false" },
 #ifdef MEDIARELAY_SPECIFIC_FEATURES_ENABLED
 			/*very specific features, useless for most people*/
 			{ Integer, "h264-filtering-bandwidth", "Enable I-frame only filtering for video H264 for clients annoucing a total bandwith below this value expressed in kbit/s. Use 0 to disable the feature", "0" },
@@ -127,6 +128,7 @@ void MediaRelay::onLoad(const GenericStruct * modconf) {
 	mMaxCalls=modconf->get<ConfigInt>("max-calls")->read();
 	mMaxRelayedEarlyMedia = modconf->get<ConfigInt>("max-early-media-per-call")->read();
 	mForceRelayForNonIceTargets = modconf->get<ConfigBoolean>("force-relay-for-non-ice-targets")->read();
+	mUsePublicIpForSdpMasquerading = modconf->get<ConfigBoolean>("force-public-ip-for-sdp-masquerading")->read();
 	mInactivityPeriod = modconf->get<ConfigInt>("inactivity-period")->read();
 	createServers();
 }
@@ -248,6 +250,7 @@ void MediaRelay::onRequest(shared_ptr<RequestSipEvent> &ev) {
 			}
 
 			c = make_shared<RelayedCall>(mServers[mCurServer], sip);
+			c->forcePublicAddress(mUsePublicIpForSdpMasquerading);
 			mCurServer = (mCurServer + 1) % mServers.size();
 			newContext=true;
 			it->setProperty<RelayedCall>(getModuleName(), c);

@@ -1,3 +1,6 @@
+; This is the reference grammar for the flexisip authdb file parsing
+; This file has to be compiled with belr-compiler and the compiled file archived into git (current location: flexisip:share/authdb-file-grammar)
+
 LWS  =  [*WSP CRLF] 1*WSP ; linear whitespace
 
 ILF =  [CR] LF ; Linefeed, optional CR

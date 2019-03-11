@@ -16,14 +16,15 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef mediarelay_hh
-#define mediarelay_hh
+#pragma once
 
-#include "module.hh"
-#include "agent.hh"
+#include <flexisip/module.hh>
+#include <flexisip/agent.hh>
 #include "callstore.hh"
 #include "sdp-modifier.hh"
 #include <ortp/rtpsession.h>
+
+namespace flexisip {
 
 class RelayedCall;
 class MediaRelayServer;
@@ -51,6 +52,7 @@ class MediaRelay : public Module, protected ModuleToolbox {
 	void processResponseWithSDP(const std::shared_ptr<RelayedCall> &c, const std::shared_ptr<OutgoingTransaction> &transaction,
 								const std::shared_ptr<MsgSip> &msgSip);
 	void configureContext(std::shared_ptr<RelayedCall> &c);
+
 	CallStore *mCalls;
 	std::vector<std::shared_ptr<MediaRelayServer>> mServers;
 	size_t mCurServer;
@@ -70,6 +72,7 @@ class MediaRelay : public Module, protected ModuleToolbox {
 	bool mEarlyMediaRelaySingle;
 	bool mPreventLoop;
 	bool mForceRelayForNonIceTargets;
+	bool mUsePublicIpForSdpMasquerading = false;
 	static ModuleInfo<MediaRelay> sInfo;
 };
 
@@ -259,4 +262,4 @@ class RelayChannel : public SdpMasqueradeContext{
 	bool mDestAddrChanged;
 };
 
-#endif
+}
